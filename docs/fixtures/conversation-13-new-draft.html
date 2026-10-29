@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en" >
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <meta name="robots" content="noindex,nofollow">
+    
+    <!-- CSRF Token -->
+    <meta name="csrf-token" content="CSRF_TOKEN_REDACTED">
+    <meta http-equiv="Content-Security-Policy" content="base-uri 'none'; default-src 'self' ; img-src * 'self' data:; font-src * 'self' data:; style-src * 'self' 'unsafe-inline'; form-action 'self' ; frame-src * 'self' data:; script-src 'self' 'nonce-DQ0uqqqPP29osudyduvqbdgGG'  ;">
+        <title>(no subject) - FreeScout </title>
+
+    <link rel="apple-touch-icon" sizes="180x180" href="https://freescout.example.com/apple-touch-icon.png">
+    <link rel="shortcut icon" type="image/x-icon" href="https://freescout.example.com/favicon.ico">
+    <link rel="manifest" href="https://freescout.example.com/site.webmanifest" crossorigin="use-credentials">
+    <link rel="mask-icon" href="https://freescout.example.com/safari-pinned-tab.svg" color="#5bbad5">
+    <meta name="msapplication-TileColor" content="#da532c">
+    <meta name="theme-color" content="#ffffff">
+        
+    
+    
+        <link href="https://freescout.example.com/css/builds/552811eceab9804ff8d211d76b95055a12548301143.css" rel="stylesheet">
+
+    
+    	    <link href="https://freescout.example.com/js/summernote/summernote.css" rel="stylesheet">
+</head>
+<body class="locale-en    body-conv "  data-mailbox_id="1" data-conversation_id="13"  data-auth_user_id="2" >
+<div id="app">
+
+        
+            <nav class="navbar navbar-default navbar-static-top">
+                <div class="container">
+                    <div class="navbar-header">
+
+                        <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#app-navbar-collapse" aria-expanded="false">
+                            <span class="sr-only">Toggle Navigation</span>
+                            <span class="icon-bar"></span>
+                            <span class="icon-bar"></span>
+                            <span class="icon-bar"></span>
+                        </button>
+
+                                                    <a class="navbar-brand" href="https://freescout.example.com" title="Dashboard">
+                                <img src="https://freescout.example.com/img/logo-brand.svg" height="100%" alt="" />
+                            </a>
+                                            </div>
+
+                    <div class="collapse navbar-collapse" id="app-navbar-collapse">
+                        <ul class="nav navbar-nav">
+                                                                                        <li class="active"><a href="https://freescout.example.com/mailbox/1">Mailbox</a></li>
+                                                                                        <li class="dropdown ">
+                                    <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-expanded="false" aria-haspopup="true" v-pre>
+                                        Manage <span class="caret"></span>
+                                    </a>
+
+                                    <ul class="dropdown-menu">
+                                                                                                                            <li class=""><a href="https://freescout.example.com/mailboxes">Mailboxes</a></li>
+                                                                                                                                                                                                                                            </ul>
+                                </li>
+                                                                                </ul>
+
+                        <!-- Right Side Of Navbar -->
+                        <ul class="nav navbar-nav navbar-right">
+                            <!-- Authentication Links -->
+                                                            <li class="dropdown web-notifications">
+                                                                        <a href="#" class="dropdown-toggle dropdown-toggle-icon " data-toggle="dropdown" role="button" aria-expanded="false" aria-haspopup="true" aria-label="Notifications" v-pre title="Notifications">
+                                        <i class="glyphicon glyphicon-bell"></i>
+                                    </a>
+
+                                    <ul class="dropdown-menu">
+                                        <li>
+                                            <div class="web-notifications-header">
+                                                <h1>
+                                                    Notifications
+                                                    <small class="web-notifications-count   hidden " title="Unread Notifications" data-toggle="tooltip"></small>
+                                                </h1>
+                                                <a href="#" class="web-notifications-mark-read  hidden " data-loading-text="Processing…">
+                                                    Mark all as read
+                                                </a>
+                                            </div>
+                                            <ul class="web-notifications-list">
+                                                                                                    <div class="text-center margin-top-40 margin-bottom-40">
+                                                        <i class="glyphicon glyphicon-bullhorn icon-large"></i>
+                                                        <p class="block-help text-large">
+                                                            Notifications will start showing up here soon
+                                                        </p>
+                                                        <a href="https://freescout.example.com/users/notifications/2">Update your notification settings</a>
+                                                    </div>
+                                                                                            </ul>
+                                        </li>
+
+                                    </ul>
+                                </li>
+
+
+                                <li class="dropdown">
+
+                                    <a href="#" class="dropdown-toggle dropdown-toggle-icon dropdown-toggle-account" data-toggle="dropdown" role="button" aria-expanded="false" aria-haspopup="true" v-pre title="Account" aria-label="Account">
+                                        <span class="photo-sm"><i class="person-photo person-photo-auto" data-initial="DA"></i></span>&nbsp;<span class="nav-user">Demo</span> <span class="caret"></span>
+                                    </a>
+
+                                    <ul class="dropdown-menu">
+                                        <li><a href="https://freescout.example.com/users/profile/2">Your Profile</a></li>
+                                                                                <li class="divider"></li>
+                                        <li>
+                                            <a href="#" id="logout-link">
+                                                Log Out
+                                            </a>
+
+                                            <form id="logout-form" action="https://freescout.example.com/logout" method="POST" style="display: none;">
+                                                <input type="hidden" name="_token" value="CSRF_TOKEN_REDACTED">
+                                            </form>
+                                        </li>
+                                        <li class="divider hidden in-app-switcher"></li>
+                                        <li>
+                                            <a href="#" class="hidden in-app-switcher">Switch Helpdesk URL</a>
+                                        </li>
+                                    </ul>
+                                </li>
+
+                                <li class="dropdown">
+                                    <a href="#" class="dropdown-toggle dropdown-toggle-icon" data-toggle="dropdown" role="button" aria-expanded="false" aria-haspopup="true" v-pre title="Search" aria-label="Search" id="search-dt">
+                                        <i class="glyphicon glyphicon-search"></i>
+                                    </a>
+
+                                    <ul class="dropdown-menu dropdown-with-icons">
+                                        <li>
+                                            <form class="form-inline form-nav-search" role="form" action="https://freescout.example.com/search">
+                                                <div class="input-group">
+                                                    <input type="text" class="form-control" name="q">
+                                                    <span class="input-group-btn">
+                                                        <button class="btn btn-default" type="submit">Search</button>
+                                                    </span>
+                                                </div>
+                                            </form>
+                                        </li>
+                                        <li><a href="https://freescout.example.com/search?f%5Bfollowing%5D=yes"><i class="glyphicon glyphicon-chevron-right"></i> Conversations I&#039;m following</a></li>
+                                        <li><a href="https://freescout.example.com/search?f%5Bassigned%5D=2&amp;f%5Bstatus%5D%5B0%5D=1&amp;f%5Bstatus%5D%5B1%5D=2"><i class="glyphicon glyphicon-chevron-right"></i> My open conversations</a></li>
+                                                                            </ul>
+                                </li>
+                                                    </ul>
+                    </div>
+                </div>
+            </nav>
+                                    <div class="layout-2col">
+                <div class="sidebar-2col">
+                        <button type="button" class="sidebar-menu-toggle" data-toggle="tooltip" data-placement="bottom" title="Open Submenu" aria-expanded="false">
+    <span class="sr-only">Toggle Navigation</span>
+    <span class="icon-bar"></span>
+    <span class="icon-bar"></span>
+    <span class="icon-bar"></span>
+</button>    <div class="dropdown sidebar-title sidebar-title-extra ">
+    <span class="sidebar-title-extra-value active-count">Drafts (1)</span>        <span class="sidebar-title-real mailbox-name">Support</span>
+    <span class="sidebar-title-email">support@freescout.example.com</span>
+</div>
+<ul class="sidebar-menu " id="folders">
+            <li class="folder-open" data-folder_id="1" data-active-count="2">
+            <a href="https://freescout.example.com/mailbox/1/1" ><i class="glyphicon glyphicon-folder-open"></i> <span class="folder-name">Unassigned</span>
+                
+                                                            <strong class="active-count pull-right" data-toggle="tooltip" title="Active Conversations">2</strong>
+                                                </a>
+        </li>
+                        <li class="hand-right" data-folder_id="17" data-active-count="2">
+            <a href="https://freescout.example.com/mailbox/1/17" ><i class="glyphicon glyphicon-hand-right"></i> <span class="folder-name">Mine</span>
+                
+                                                            <strong class="active-count pull-right" data-toggle="tooltip" title="Active Conversations">2</strong>
+                                                </a>
+        </li>
+                        <li class="star" data-folder_id="18" data-active-count="1">
+            <a href="https://freescout.example.com/mailbox/1/18" ><i class="glyphicon glyphicon-star"></i> <span class="folder-name">Starred</span>
+                
+                                                            <span class="active-count pull-right" data-toggle="tooltip" title="Active Conversations">1</span>
+                                                </a>
+        </li>
+                        <li class="duplicate active " data-folder_id="2" data-active-count="1">
+            <a href="https://freescout.example.com/mailbox/1/2" ><i class="glyphicon glyphicon-duplicate"></i> <span class="folder-name">Drafts</span>
+                
+                                                            <span class="active-count pull-right" data-toggle="tooltip" title="Active Conversations">1</span>
+                                                </a>
+        </li>
+                        <li class="user" data-folder_id="3" data-active-count="3">
+            <a href="https://freescout.example.com/mailbox/1/3" ><i class="glyphicon glyphicon-user"></i> <span class="folder-name">Assigned</span>
+                
+                                                            <span class="active-count pull-right" data-toggle="tooltip" title="Active Conversations">1</span>
+                                                </a>
+        </li>
+                        <li class="lock" data-folder_id="4" data-active-count="0">
+            <a href="https://freescout.example.com/mailbox/1/4"  class="no-active" ><i class="glyphicon glyphicon-lock"></i> <span class="folder-name">Closed</span>
+                
+                            </a>
+        </li>
+                            <li class="ban-circle" data-folder_id="5" data-active-count="0">
+            <a href="https://freescout.example.com/mailbox/1/5"  class="no-active" ><i class="glyphicon glyphicon-ban-circle"></i> <span class="folder-name">Spam</span>
+                
+                            </a>
+        </li>
+        </ul>
+                <div class="sidebar-buttons btn-group btn-group-justified  has-settings ">
+                            <div class="btn-group dropdown" data-toggle="tooltip" title="Mailbox Settings">
+                    <a class="btn btn-trans dropdown-toggle" data-toggle="dropdown" href="#"><i class="glyphicon glyphicon-cog"></i> <b class="caret"></b></a>
+                    <ul class="dropdown-menu" role="menu">
+                        <li class="divider"></li>
+    <li><a href="https://freescout.example.com/conversation/ajax-html/default_redirect?mailbox_id=1" data-trigger="modal" data-modal-title="Default Redirect" data-modal-no-footer="true" data-modal-on-show="initAfterSendModal" role="button"><i class="glyphicon glyphicon-share-alt"></i> Default Redirect…</span></a></li>
+	<li class="divider"></li>
+	<li><a href="#" class="mailbox-mute-trigger"  data-mute="1"  data-mailbox-id="1" data-loading-text="Processing…"><i class="glyphicon glyphicon-volume-off"></i> <span class="mute-text-1 ">Mute Notifications</span><span class="mute-text-0  hidden ">Unmute Notifications</span></a></li>
+                    </ul>
+                </div>
+                                    <a class="btn btn-trans" href="https://freescout.example.com/mailbox/1/new-ticket" aria-label="New Conversation" data-toggle="tooltip" title="New Conversation" role="button"><i class="glyphicon glyphicon-envelope"></i></a>
+        </div>
+                        </div>
+                                <div class="content-2col">
+                        
+    
+    <div id="conv-layout" class="conv-new">
+        <div id="conv-layout-header">
+            <div id="conv-toolbar">
+                
+                <div class="conv-actions">
+                    <h2>New Conversation</h2>
+
+                    <div class="btn-group">
+                        <button type="button" class="btn btn-default active conv-switch-button" id="email-conv-switch"><i class="glyphicon glyphicon-envelope"></i></button>
+                        <button type="button" class="btn btn-default conv-switch-button" id="phone-conv-switch"><i class="glyphicon glyphicon-earphone"></i></button>
+                                            </div>
+                </div>
+
+                <div class="conv-info">
+                    #<strong>13</strong></strong>
+                </div>
+
+                <div class="clearfix"></div>
+
+            </div>
+        </div>
+        <div id="conv-layout-customer">
+                                </div>
+        <div id="conv-layout-main" class="conv-new-form">
+            <div class="conv-block">
+                <div class="row">
+                    <div class="col-xs-12">
+                        <form class="form-horizontal margin-top form-reply" method="POST" action="" id="form-create">
+                            <input type="hidden" name="_token" value="CSRF_TOKEN_REDACTED">
+                            <input type="hidden" name="conversation_id" value="13"/>
+                            <input type="hidden" name="mailbox_id" value="1"/>
+                            
+                            <input type="hidden" name="is_note" value=""/>
+                            <input type="hidden" name="is_phone" value=""/>
+                            <input type="hidden" name="type" value="1"/>
+                            
+                            <input type="hidden" name="thread_id" value="26"/>
+                            
+                            <input type="hidden" name="customer_id" value=""/>
+                            <input type="hidden" name="is_create" value="1"/>
+                            
+                                                            <div class="form-group">
+                                    <label class="col-sm-2 control-label">Author</label>
+
+                                    <div class="col-sm-9">
+                                        <label class="control-label text-help">
+                                            <i class="glyphicon glyphicon-user"></i> Demo Admin
+                                        </label>
+                                    </div>
+                                </div>
+                            
+                            <div class="form-group phone-conv-fields">
+                                <label for="name" class="col-sm-2 control-label">Customer Name</label>
+
+                                <div class="col-sm-9">
+
+                                    <select class="form-control parsley-exclude draft-changer" name="name" id="name" multiple required autofocus/>
+                                                                            </select>
+
+                                                                    </div>
+                            </div>
+
+                            <div class="form-group phone-conv-fields">
+                                <label for="phone" class="col-sm-2 control-label">Phone</label>
+
+                                <div class="col-sm-9">
+
+                                    <select class="form-control draft-changer" name="phone" id="phone" placeholder="(optional)" multiple/>
+                                                                            </select>
+
+                                                                    </div>
+                            </div>
+
+                            <div id="conv-to-email-group">
+                                <div class="form-group phone-conv-fields" id="field-to_email">
+                                    <label for="to_email" class="col-sm-2 control-label">Email</label>
+
+                                    <div class="col-sm-9">
+
+                                        <select class="form-control draft-changer" name="to_email" id="to_email" placeholder="(optional)" multiple/>
+                                                                                    </select>
+
+                                                                            </div>
+                                </div>
+
+                                <div class="col-sm-9 col-sm-offset-2 toggle-field phone-conv-fields" id="toggle-email">
+                                    <a href="#">Add Email</a>
+                                </div>
+                            </div>
+
+                            
+                            <div class="form-group" id="field-to">
+                                <label for="to" class="col-sm-2 control-label">To</label>
+
+                                <div class="col-sm-9">
+
+                                    <select class="form-control recipient-select" name="to[]" id="to" multiple required autofocus/>
+                                                                                                                                    <option value="draft-test@customer.example" selected="selected">draft-test@customer.example</option>
+                                                                                                                        </select>
+
+                                    <label class="checkbox  hidden " for="multiple_conversations" id="multiple-conversations-wrap">
+                                        <input type="checkbox" name="multiple_conversations" value="1" id="multiple_conversations"> Send emails separately to each recipient
+                                    </label>
+
+                                                                    </div>
+                            </div>
+
+                            <div class="form-group email-conv-fields  hidden  field-cc">
+                                <label for="cc" class="col-sm-2 control-label">Cc</label>
+
+                                <div class="col-sm-9">
+                                    <select class="form-control recipient-select" name="cc[]" id="cc" multiple/>
+                                                                            </select>
+
+                                                                    </div>
+                            </div>
+
+                            <div class="form-group email-conv-fields  hidden  field-cc">
+                                <label for="bcc" class="col-sm-2 control-label">Bcc</label>
+
+                                <div class="col-sm-9">
+
+                                    <select class="form-control recipient-select" name="bcc[]" id="bcc" multiple/>
+                                                                            </select>
+
+                                                                    </div>
+                            </div>
+
+                            <div class="col-sm-9 col-sm-offset-2 email-conv-fields toggle-field ">
+                                <a href="#" class="help-link" id="toggle-cc">Cc/Bcc</a>
+                            </div>
+
+                                                        <div class="form-group">
+                                <label for="subject" class="col-sm-2 control-label">Subject</label>
+
+                                <div class="col-sm-9">
+                                    <input id="subject" type="text" class="form-control" name="subject" value="MCP draft-conversation test" maxlength="998" required autofocus>                                                                    </div>
+                            </div>
+                            
+                                                        <div class="thread-attachments attachments-upload" >
+                                                                <ul>
+                                                                    </ul>
+                            </div>
+
+                            <div class="form-group conv-reply-body">
+                                <div class="col-sm-12">
+                                    <textarea id="body" class="form-control" name="body" rows="13" data-parsley-required="true" data-parsley-required-message="Please enter a message">&lt;p&gt;unsent new conversation&lt;/p&gt;</textarea>
+                                    <div class="help-block">
+                                                                            </div>
+                                </div>
+                            </div>
+
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div id="editor_bottom_toolbar" style="display:none">
+    <div id="editor_signature">
+                    <br><span style="color:#808080;">--<br>
+Support</span>
+            </div>
+    	<span class="editor-btm-text">Status:</span> 
+    
+	<select name="status" class="form-control parsley-exclude" data-reply-status="2" data-note-status="1">
+                    <option value="1" >Active</option>
+                    <option value="2" selected="selected">Pending</option>
+                    <option value="3" >Closed</option>
+            </select> 
+    <small class="note-bottom-div"></small> 
+    <span class="editor-btm-text">Assign to:</span> 
+    
+    <select name="user_id" class="form-control parsley-exclude">
+        <option value="-1" >Anyone</option>
+    	<option value="2" data-default="true" selected="selected">Me</option>
+                                	<option value="1"  >Demo Admin</option>
+                                            </select> 
+
+    <input type="hidden" name="after_send" id="after_send" value="2" class="parsley-exclude"/>
+    <div class="btn-group btn-group-send">
+    	<button class="hidden"></button>
+        <button type="button" class="btn btn-primary btn-reply-submit btn-send-text" data-loading-text="Sending…">Send</button>
+        <button type="button" class="btn btn-primary btn-reply-submit btn-send-forward" data-loading-text="Sending…">Forward</button>
+        <button type="button" class="btn btn-primary btn-reply-submit btn-add-note-text" data-loading-text="Saving…">Add Note</button>
+        <button type="button" class="btn btn-primary btn-reply-submit btn-create-conv" data-loading-text="Creating…">Create</button>
+        <button type="button" class="btn btn-primary btn-send-menu" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false"><small class="glyphicon glyphicon-chevron-down"></small></button>
+        <ul class="dropdown-menu dropdown-menu-right dropdown-after-send">
+                        <li ><a href="#" data-after-send="1">Send and stay on page</a></li>
+            <li  class="active" ><a href="#" data-after-send="2">Send and next active</a></li>
+            <li ><a href="#" data-after-send="3">Send and back to folder</a></li>
+                                            </ul>
+    </div>
+    <div id="after-send-change-body" class="hidden">
+        <div class="row-container">
+            <div class="row">
+                <div class="form-horizontal">
+                    <div class="form-group">
+                        <label for="after_send" class="col-sm-3 control-label">After Sending</label>
+
+                        <div class="col-sm-9">
+                            <select class="form-control input-sized" name="after_send_default" required autofocus>
+                                <option value="1" >Stay on the same page</option>
+                                <option value="2" selected="selected">Next active conversation</option>
+                                <option value="3" >Back to folder</option>
+                            </select>
+
+                            <p class="block-help">
+                                This setting gives you control over what page loads after you perform an action (send a reply, add a note, change conversation status or assignee).
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <div class="col-sm-9 col-sm-offset-3">
+                            <button type="button" class="btn btn-primary after-send-save" data-loading-text="Saving…">
+                                Save
+                            </button>
+
+                            <a href="#" class="btn btn-link" data-dismiss="modal">Cancel</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+                    </div>
+            </div>
+        
+                    <div class="footer">
+                                    &copy; 2018-2026 <a href="https://freescout.net" target="blank">FreeScout</a> — Free open source help desk &amp; shared mailbox
+                                                
+                            </div>
+            </div>
+
+    <div id="loader-main"></div>
+
+    
+        
+    
+        <script src="https://freescout.example.com/js/builds/cf7c8164a6f5386a977279bc27ee85d926889270219.js"></script>
+
+        		<script src="https://freescout.example.com/js/builds/67c170ad5951969d1f570df9366d88411792614449.js"></script>
+
+    <script type="text/javascript"  nonce="NONCE_REDACTED">
+                        initReplyForm(true, true, true);
+    initNewConversation();
+            </script>
+</body>
+</html>

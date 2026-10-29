@@ -1,0 +1,54 @@
+{
+  "name": "freescout-mcp",
+  "version": "0.1.0",
+  "description": "MCP server that works a FreeScout inbox through a browser session cookie or username/password (no API key needed).",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ma-04/freescout-mcp.git"
+  },
+  "homepage": "https://github.com/ma-04/freescout-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/ma-04/freescout-mcp/issues"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && chmod +x dist/index.js dist/http.js",
+    "dev": "tsx src/index.ts",
+    "dev:http": "tsx src/http.ts",
+    "start": "node dist/index.js",
+    "start:http": "node dist/http.js",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "freescout",
+    "helpdesk"
+  ],
+  "author": "ma-04",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "cheerio": "^1.2.0",
+    "tough-cookie": "^6.0.2",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "~4.1.12"
+  },
+  "type": "module",
+  "bin": {
+    "freescout-mcp": "dist/index.js",
+    "freescout-mcp-http": "dist/http.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  }
+}

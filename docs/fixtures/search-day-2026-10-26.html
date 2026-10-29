@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en" >
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <meta name="robots" content="noindex,nofollow">
+    
+    <!-- CSRF Token -->
+    <meta name="csrf-token" content="XHUG97MrTNTV1PpmU1XwopOsXz8MPP1SndHsDezt">
+    <meta http-equiv="Content-Security-Policy" content="base-uri 'none'; default-src 'self' ; img-src * 'self' data:; font-src * 'self' data:; style-src * 'self' 'unsafe-inline'; form-action 'self' ; frame-src * 'self' data:; script-src 'self' 'nonce-C4yTGJ1rqLEfWiPxIF7qGCOQu'  ;">
+        <title>Search - FreeScout </title>
+
+    <link rel="apple-touch-icon" sizes="180x180" href="https://freescout.example.com/apple-touch-icon.png">
+    <link rel="shortcut icon" type="image/x-icon" href="https://freescout.example.com/favicon.ico">
+    <link rel="manifest" href="https://freescout.example.com/site.webmanifest" crossorigin="use-credentials">
+    <link rel="mask-icon" href="https://freescout.example.com/safari-pinned-tab.svg" color="#5bbad5">
+    <meta name="msapplication-TileColor" content="#da532c">
+    <meta name="theme-color" content="#ffffff">
+        
+    
+    
+        <link href="https://freescout.example.com/css/builds/552811eceab9804ff8d211d76b95055a12548301143.css" rel="stylesheet">
+
+    
+    		    	<link href="https://freescout.example.com/js/flatpickr/flatpickr.min.css" rel="stylesheet">
+    </head>
+<body class="locale-en    body-search "   data-auth_user_id="2" >
+<div id="app">
+
+        
+            <nav class="navbar navbar-default navbar-static-top">
+                <div class="container">
+                    <div class="navbar-header">
+
+                        <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#app-navbar-collapse" aria-expanded="false">
+                            <span class="sr-only">Toggle Navigation</span>
+                            <span class="icon-bar"></span>
+                            <span class="icon-bar"></span>
+                            <span class="icon-bar"></span>
+                        </button>
+
+                                                    <a class="navbar-brand" href="https://freescout.example.com" title="Dashboard">
+                                <img src="https://freescout.example.com/img/logo-brand.svg" height="100%" alt="" />
+                            </a>
+                                            </div>
+
+                    <div class="collapse navbar-collapse" id="app-navbar-collapse">
+                        <ul class="nav navbar-nav">
+                                                                                        <li class=""><a href="https://freescout.example.com/mailbox/1">Mailbox</a></li>
+                                                                                        <li class="dropdown ">
+                                    <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-expanded="false" aria-haspopup="true" v-pre>
+                                        Manage <span class="caret"></span>
+                                    </a>
+
+                                    <ul class="dropdown-menu">
+                                                                                                                            <li class=""><a href="https://freescout.example.com/mailboxes">Mailboxes</a></li>
+                                                                                                                                                                                                                                            </ul>
+                                </li>
+                                                                                </ul>
+
+                        <!-- Right Side Of Navbar -->
+                        <ul class="nav navbar-nav navbar-right">
+                            <!-- Authentication Links -->
+                                                            <li class="dropdown web-notifications">
+                                                                        <a href="#" class="dropdown-toggle dropdown-toggle-icon " data-toggle="dropdown" role="button" aria-expanded="false" aria-haspopup="true" aria-label="Notifications" v-pre title="Notifications">
+                                        <i class="glyphicon glyphicon-bell"></i>
+                                    </a>
+
+                                    <ul class="dropdown-menu">
+                                        <li>
+                                            <div class="web-notifications-header">
+                                                <h1>
+                                                    Notifications
+                                                    <small class="web-notifications-count   hidden " title="Unread Notifications" data-toggle="tooltip"></small>
+                                                </h1>
+                                                <a href="#" class="web-notifications-mark-read  hidden " data-loading-text="Processing…">
+                                                    Mark all as read
+                                                </a>
+                                            </div>
+                                            <ul class="web-notifications-list">
+                                                                                                    <div class="text-center margin-top-40 margin-bottom-40">
+                                                        <i class="glyphicon glyphicon-bullhorn icon-large"></i>
+                                                        <p class="block-help text-large">
+                                                            Notifications will start showing up here soon
+                                                        </p>
+                                                        <a href="https://freescout.example.com/users/notifications/2">Update your notification settings</a>
+                                                    </div>
+                                                                                            </ul>
+                                        </li>
+
+                                    </ul>
+                                </li>
+
+
+                                <li class="dropdown">
+
+                                    <a href="#" class="dropdown-toggle dropdown-toggle-icon dropdown-toggle-account" data-toggle="dropdown" role="button" aria-expanded="false" aria-haspopup="true" v-pre title="Account" aria-label="Account">
+                                        <span class="photo-sm"><i class="person-photo person-photo-auto" data-initial="DA"></i></span>&nbsp;<span class="nav-user">Demo</span> <span class="caret"></span>
+                                    </a>
+
+                                    <ul class="dropdown-menu">
+                                        <li><a href="https://freescout.example.com/users/profile/2">Your Profile</a></li>
+                                                                                <li class="divider"></li>
+                                        <li>
+                                            <a href="#" id="logout-link">
+                                                Log Out
+                                            </a>
+
+                                            <form id="logout-form" action="https://freescout.example.com/logout" method="POST" style="display: none;">
+                                                <input type="hidden" name="_token" value="XHUG97MrTNTV1PpmU1XwopOsXz8MPP1SndHsDezt">
+                                            </form>
+                                        </li>
+                                        <li class="divider hidden in-app-switcher"></li>
+                                        <li>
+                                            <a href="#" class="hidden in-app-switcher">Switch Helpdesk URL</a>
+                                        </li>
+                                    </ul>
+                                </li>
+
+                                <li class="dropdown">
+                                    <a href="#" class="dropdown-toggle dropdown-toggle-icon" data-toggle="dropdown" role="button" aria-expanded="false" aria-haspopup="true" v-pre title="Search" aria-label="Search" id="search-dt">
+                                        <i class="glyphicon glyphicon-search"></i>
+                                    </a>
+
+                                    <ul class="dropdown-menu dropdown-with-icons">
+                                        <li>
+                                            <form class="form-inline form-nav-search" role="form" action="https://freescout.example.com/search">
+                                                <div class="input-group">
+                                                    <input type="text" class="form-control" name="q">
+                                                    <span class="input-group-btn">
+                                                        <button class="btn btn-default" type="submit">Search</button>
+                                                    </span>
+                                                </div>
+                                            </form>
+                                        </li>
+                                        <li><a href="https://freescout.example.com/search?f%5Bfollowing%5D=yes"><i class="glyphicon glyphicon-chevron-right"></i> Conversations I&#039;m following</a></li>
+                                        <li><a href="https://freescout.example.com/search?f%5Bassigned%5D=2&amp;f%5Bstatus%5D%5B0%5D=1&amp;f%5Bstatus%5D%5B1%5D=2"><i class="glyphicon glyphicon-chevron-right"></i> My open conversations</a></li>
+                                                                            </ul>
+                                </li>
+                                                    </ul>
+                    </div>
+                </div>
+            </nav>
+                                    <div class="layout-2col">
+                <div class="sidebar-2col">
+                        <button type="button" class="sidebar-menu-toggle" data-toggle="tooltip" data-placement="bottom" title="Open Submenu" aria-expanded="false">
+    <span class="sr-only">Toggle Navigation</span>
+    <span class="icon-bar"></span>
+    <span class="icon-bar"></span>
+    <span class="icon-bar"></span>
+</button>    <div class="sidebar-title">
+		Search
+	</div>
+    <ul class="sidebar-menu sidebar-menu-noicons">
+    	    	        <li class="no-link"><span class="text-help">Filters</span></li>
+		            <li class="menu-link menu-padded">
+            	<a href="#" data-filter="assigned" >assigned:</a>
+            </li>
+                    <li class="menu-link menu-padded">
+            	<a href="#" data-filter="customer" >customer:</a>
+            </li>
+                    <li class="menu-link menu-padded">
+            	<a href="#" data-filter="mailbox" >mailbox:</a>
+            </li>
+                    <li class="menu-link menu-padded">
+            	<a href="#" data-filter="status" >status:</a>
+            </li>
+                    <li class="menu-link menu-padded">
+            	<a href="#" data-filter="state" >state:</a>
+            </li>
+                    <li class="menu-link menu-padded">
+            	<a href="#" data-filter="subject" >subject:</a>
+            </li>
+                    <li class="menu-link menu-padded">
+            	<a href="#" data-filter="attachments" >attachments:</a>
+            </li>
+                    <li class="menu-link menu-padded">
+            	<a href="#" data-filter="type" >type:</a>
+            </li>
+                    <li class="menu-link menu-padded">
+            	<a href="#" data-filter="body" >body:</a>
+            </li>
+                    <li class="menu-link menu-padded">
+            	<a href="#" data-filter="number" >number:</a>
+            </li>
+                    <li class="menu-link menu-padded">
+            	<a href="#" data-filter="following" >following:</a>
+            </li>
+                    <li class="menu-link menu-padded">
+            	<a href="#" data-filter="id" >id:</a>
+            </li>
+                    <li class="menu-link menu-padded">
+            	<a href="#" data-filter="after" class="active">after:</a>
+            </li>
+                    <li class="menu-link menu-padded">
+            	<a href="#" data-filter="before" class="active">before:</a>
+            </li>
+            </ul>
+                </div>
+                                <div class="content-2col">
+                    
+	<div class="section-heading section-search">
+		<form action="https://freescout.example.com/search">
+
+			
+			
+			
+			<div class="row" id="search-filters">
+				<div class="col-sm-6 form-group " data-filter="assigned">
+		            <label>Assigned <b class="remove" data-toggle="tooltip" title="Remove filter">×</b></label>
+		            <select name="f[assigned]" class="form-control"  disabled >
+		            	<option value=""></option>
+						<option value="-1" >Unassigned</option>
+                                                    <option value="2" >Demo Agent</option>
+                                            </select>
+		        </div>
+				<div class="col-sm-6 form-group " data-filter="customer">
+		            <label>Customer <b class="remove" data-toggle="tooltip" title="Remove filter">×</b></label>
+		            <div class="controls">
+		            	<select class="form-control" name="f[customer]" id="search-filter-customer"  disabled />
+		            	 			            	</select>
+		            </div>
+		        </div>
+				<div class="col-sm-6 form-group " data-filter="mailbox">
+		            <label>Mailbox <b class="remove" data-toggle="tooltip" title="Remove filter">×</b></label>
+		            <select name="f[mailbox]" class="form-control"  disabled >
+		            	<option value=""></option>
+                                                    <option value="1" >Support</option>
+                                            </select>
+		        </div>
+				<div class="col-sm-6 form-group " data-filter="company">
+		            <label>Company <b class="remove" data-toggle="tooltip" title="Remove filter">×</b></label>
+		            <input type="text" name="f[company]" value="" class="form-control"  disabled >
+		        </div>
+				<div class="col-sm-6 form-group " data-filter="status">
+		            <label>Status <b class="remove" data-toggle="tooltip" title="Remove filter">×</b></label>
+		            <select name="f[status][]" class="form-control filter-multiple" multiple  disabled >
+		            	
+                                                    <option value="1" >Active</option>
+                                                    <option value="2" >Pending</option>
+                                                    <option value="3" >Closed</option>
+                                                    <option value="4" >Spam</option>
+                                            </select>
+		        </div>
+				<div class="col-sm-6 form-group " data-filter="state">
+		            <label>State <b class="remove" data-toggle="tooltip" title="Remove filter">×</b></label>
+		            <select name="f[state][]" class="form-control filter-multiple" multiple  disabled >
+		            	
+                                                    <option value="1" >Draft</option>
+                                                    <option value="2" >Published</option>
+                                                    <option value="3" >Deleted</option>
+                                            </select>
+		        </div>
+				<div class="col-sm-6 form-group " data-filter="subject">
+		            <label>Subject <b class="remove" data-toggle="tooltip" title="Remove filter">×</b></label>
+		            <input type="text" name="f[subject]" value="" class="form-control"  disabled >
+		        </div>
+				<div class="col-sm-6 form-group " data-filter="attachments">
+		            <label>Attachments <b class="remove" data-toggle="tooltip" title="Remove filter">×</b></label>
+		            <select name="f[attachments]" class="form-control"  disabled >
+		            	<option value=""></option>
+                        <option value="yes" >Yes</option>
+                        <option value="no" >No</option>
+                    </select>
+		        </div>
+				<div class="col-sm-6 form-group " data-filter="type">
+		            <label>Type <b class="remove" data-toggle="tooltip" title="Remove filter">×</b></label>
+		            <select name="f[type]" class="form-control"  disabled >
+		            	<option value=""></option>
+                                                    <option value="1" >Email</option>
+                                                    <option value="2" >Phone</option>
+                                                    <option value="3" >Chat</option>
+                                                    <option value="4" >4</option>
+                                            </select>
+		        </div>
+				<div class="col-sm-6 form-group " data-filter="body">
+		            <label>Body <b class="remove" data-toggle="tooltip" title="Remove filter">×</b></label>
+		            <input type="text" name="f[body]" value="" class="form-control"  disabled >
+		        </div>
+				<div class="col-sm-6 form-group " data-filter="number">
+		            <label>Number <b class="remove" data-toggle="tooltip" title="Remove filter">×</b></label>
+		            <input type="text" name="f[number]" value="" class="form-control"  disabled >
+		        </div>
+				<div class="col-sm-6 form-group " data-filter="following">
+		            <label>Following <b class="remove" data-toggle="tooltip" title="Remove filter">×</b></label>
+		            <select name="f[following]" class="form-control"  disabled >
+		            	<option value=""></option>
+                        <option value="yes" >Yes</option>
+                    </select>
+		        </div>
+				<div class="col-sm-6 form-group " data-filter="id">
+		            <label>ID <b class="remove" data-toggle="tooltip" title="Remove filter">×</b></label>
+		            <input type="text" name="f[id]" value="" class="form-control"  disabled >
+		        </div>
+				<div class="col-sm-6 form-group  active " data-filter="after">
+		            <label>After <b class="remove" data-toggle="tooltip" title="Remove filter">×</b></label>
+		            <input type="text" name="f[after]" value="2026-10-26" class="form-control input-date" >
+		        </div>
+				<div class="col-sm-6 form-group  active " data-filter="before">
+		            <label>Before <b class="remove" data-toggle="tooltip" title="Remove filter">×</b></label>
+		            <input type="text" name="f[before]" value="2026-10-26" class="form-control input-date" >
+		        </div>
+		        		    </div>
+
+	        <div class="input-group input-group-lg1">
+	            <input type="text" class="form-control" name="q" value="">
+	            <span class="input-group-btn">
+	                <button class="btn btn-default" type="submit">Search</button>
+	            </span>
+	        </div>
+	    </form>
+	</div>
+
+	<div class="search-results">
+		<ul class="nav nav-tabs nav-tabs-main margin-top">
+					    	<li class="active search-tab-conv"><a href="https://freescout.example.com/search?f%5Bafter%5D=2026-10-26&amp;f%5Bbefore%5D=2026-10-26&amp;mode=conversations">Conversations <b>(4)</b></a></li>
+		    		    <li ><a href="https://freescout.example.com/search?f%5Bafter%5D=2026-10-26&amp;f%5Bbefore%5D=2026-10-26&amp;mode=customers">Customers <b>(10)</b></a></li>
+		</ul>
+			    	<div id="conversations-bulk-actions" class="text-center">
+    <div class="btn-group" role="group">
+        <button type="button" class="btn btn-default conv-checkbox-clear" title="Clear">
+            <span class="glyphicon glyphicon-arrow-left"></span>
+        </button>
+                    <div class="btn-group">
+                <button type="button" class="btn btn-default" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" title="Assignee">
+                    <span class="glyphicon glyphicon-user"></span><span class="caret"></span>
+                </button>
+                <ul class="dropdown-menu conv-user dm-scrollable">
+                    <li><a href="#" data-user_id="-1">Anyone</a></li>
+                    <li><a href="#" data-user_id="2">Me</a></li>
+                                                                                                    <li><a href="#" data-user_id="1"  >Demo Admin</a></li>
+                                                                                                        </ul>
+            </div>
+                <div class="btn-group">
+            <button type="button" class="btn btn-default" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" title="Status">
+                <span class="glyphicon glyphicon-flag"></span><span class="caret"></span>
+            </button>
+            <ul class="dropdown-menu conv-status">
+                                    <li><a href="#" data-status="1">Active</a></li>
+                                    <li><a href="#" data-status="2">Pending</a></li>
+                                    <li><a href="#" data-status="3">Closed</a></li>
+                                    <li><a href="#" data-status="4">Spam</a></li>
+                            </ul>
+        </div>
+                    </div>
+</div>
+
+<div id="conversations-bulk-actions-delete-modal" class="hide">
+    <div class="text-center">
+        <div class="text-larger margin-top-10">Delete the conversations?</div>
+        <div class="form-group margin-top">
+            <button class="btn btn-primary delete-conversation-ok" data-loading-text="Deleting…">Delete</button>
+            <button class="btn btn-link" data-dismiss="modal">Cancel</button>
+        </div>
+    </div>
+</div>
+    
+
+    <table class="table-conversations table " data-page="1"  data-param_target_blank=""  data-param_show_mailbox=""    data-sorting_sort_by="date"  data-sorting_order="desc"  >
+        <colgroup>
+            
+            <col class="conv-current">
+            <col class="conv-cb">            <col class="conv-customer">            <col class="conv-attachment">
+            <col class="conv-subject">
+            <col class="conv-thread-count">
+                            <col class="conv-owner">                                    <col class="conv-number">
+            <col class="conv-date">
+        </colgroup>
+        <thead>
+        <tr>
+            <th class="conv-current">&nbsp;</th>
+            <th class="conv-cb"><input type="checkbox" class="toggle-all magic-checkbox" id="toggle-all"><label for="toggle-all"><span class="sr-only">Select All Conversations</span></label></th>                            <th class="conv-customer">
+                    <span>Customer</span>
+                </th>
+                        <th class="conv-attachment">&nbsp;</th>
+            <th class="conv-subject" colspan="2">
+                <span class="conv-col-sort" data-sort-by="subject" data-order="asc">
+                    Conversation 
+                                                          </span>
+            </th>
+                            <th class="conv-owner fs-trigger-modal " data-remote="https://freescout.example.com/conversation/ajax-html/assignee_filter?mailbox_id=&amp;user_id=" data-trigger="modal" data-modal-title="Assigned To" data-modal-no-footer="true" data-modal-on-show="initConvAssigneeFilter">
+                    <span>Assigned To<small class="glyphicon glyphicon-filter"></small></span>
+                </th>
+                
+                                    <th class="conv-number">
+                <span class="conv-col-sort" data-sort-by="number" data-order="asc">
+                    Number 
+                                                          </span>
+            </th>
+            <th class="conv-date">
+                <span>
+                    <span class="conv-col-sort" data-sort-by="date" data-order="desc">
+                        Waiting Since ↑                    </a>
+                </span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+                            <tr class="conv-row   conv-active  " data-conversation_id="9">
+                    <td class="conv-current"></td>                                            <td class="conv-cb">
+                            <input type="checkbox" class="conv-checkbox magic-checkbox" id="cb-9" name="cb_9" value="9"><label for="cb-9"><span class="sr-only">Select Conversation: Dashboard charts not loading in Safari 18</span></label>
+                        </td>
+                                                                <td class="conv-customer">
+                            <a href="https://freescout.example.com/conversation/9?folder_id=3"  title="carlos.mendes@tidepool.example">
+                                <span class="conv-customer-line"><span class="conv-customer-name">Carlos Mendes&nbsp;</span><span class="conv-counter">2</span></span>
+                                                                    <small class="conv-owner-mobile text-help">
+                                        Demo Agent <small class="glyphicon glyphicon-user"></small>
+                                    </small>
+                                                                <span class="conv-email">carlos.mendes@tidepool.example</span>
+                            </a>
+                        </td>
+                                        <td class="conv-attachment">
+                        <i role="button" tabindex="0" class="glyphicon conv-star  glyphicon-star-empty " title="Star Conversation"></i>
+                        
+                                                    &nbsp;
+                                            </td>
+                    <td class="conv-subject">
+                        <a href="https://freescout.example.com/conversation/9?folder_id=3" title="View conversation" >
+                            <span class="conv-fader"></span>
+                            <p>
+                                                                                                                                Dashboard charts not loading in Safari 18                            </p>
+                            <p class="conv-preview">Hi Carlos, Thanks for the console output, that pinpointed it. We&#039;ve reproduced the issue and our engineers are working on a fix. As a workaround, Chrome or Firefox will display the charts correctly. Demo Agent</p>
+                        </a>
+                    </td>
+                    <td class="conv-thread-count">
+                        <i role="button" tabindex="0" class="glyphicon conv-star  glyphicon-star-empty " title="Star Conversation"></i>
+
+                        
+                    </td>
+                                            <td class="conv-owner">
+                            <a href="https://freescout.example.com/conversation/9?folder_id=3" title="View conversation" > Demo Agent </a>                        </td>
+                                                            <td class="conv-number">
+                        <a href="https://freescout.example.com/conversation/9?folder_id=3" title="View conversation" ><i>#</i>9</a>
+                    </td>
+                    <td class="conv-date">
+                        <a href="https://freescout.example.com/conversation/9?folder_id=3"  aria-label="1 day ago" aria-description="Last reply by User&lt;br/&gt;Oct 26, 2026 18:22" data-toggle="tooltip" data-html="true" data-placement="left" title="Last reply by User&lt;br/&gt;Oct 26, 2026 18:22" >1 day ago</a>
+                    </td>
+                </tr>
+                                            <tr class="conv-row   conv-active  " data-conversation_id="1">
+                    <td class="conv-current"></td>                                            <td class="conv-cb">
+                            <input type="checkbox" class="conv-checkbox magic-checkbox" id="cb-1" name="cb_1" value="1"><label for="cb-1"><span class="sr-only">Select Conversation: Can&#039;t log in after password reset</span></label>
+                        </td>
+                                                                <td class="conv-customer">
+                            <a href="https://freescout.example.com/conversation/1?folder_id=1"  title="maria.lopez@brightpath.example">
+                                <span class="conv-customer-line"><span class="conv-customer-name">Maria Lopez&nbsp;</span></span>
+                                                                <span class="conv-email">maria.lopez@brightpath.example</span>
+                            </a>
+                        </td>
+                                        <td class="conv-attachment">
+                        <i role="button" tabindex="0" class="glyphicon conv-star  glyphicon-star-empty " title="Star Conversation"></i>
+                        
+                                                    &nbsp;
+                                            </td>
+                    <td class="conv-subject">
+                        <a href="https://freescout.example.com/conversation/1?folder_id=1" title="View conversation" >
+                            <span class="conv-fader"></span>
+                            <p>
+                                                                                                                                Can&#039;t log in after password reset                            </p>
+                            <p class="conv-preview">Hi team, I reset my password this morning using the link you emailed, but now every login attempt says &quot;Invalid credentials&quot;. I&#039;ve tried in Chrome and Firefox and cleared cookies. Our weekly report is due today, can you help? Thanks, Maria</p>
+                        </a>
+                    </td>
+                    <td class="conv-thread-count">
+                        <i role="button" tabindex="0" class="glyphicon conv-star  glyphicon-star-empty " title="Star Conversation"></i>
+
+                        
+                    </td>
+                                            <td class="conv-owner">
+                             &nbsp;                        </td>
+                                                            <td class="conv-number">
+                        <a href="https://freescout.example.com/conversation/1?folder_id=1" title="View conversation" ><i>#</i>1</a>
+                    </td>
+                    <td class="conv-date">
+                        <a href="https://freescout.example.com/conversation/1?folder_id=1"  aria-label="1 day ago" aria-description="Created by Customer&lt;br/&gt;Oct 26, 2026 17:12" data-toggle="tooltip" data-html="true" data-placement="left" title="Created by Customer&lt;br/&gt;Oct 26, 2026 17:12" >1 day ago</a>
+                    </td>
+                </tr>
+                                            <tr class="conv-row   conv-active  " data-conversation_id="4">
+                    <td class="conv-current"></td>                                            <td class="conv-cb">
+                            <input type="checkbox" class="conv-checkbox magic-checkbox" id="cb-4" name="cb_4" value="4"><label for="cb-4"><span class="sr-only">Select Conversation: SSO setup with Okta returns invalid_audience</span></label>
+                        </td>
+                                                                <td class="conv-customer">
+                            <a href="https://freescout.example.com/conversation/4?folder_id=1"  title="aisha.khan@lumenlabs.example">
+                                <span class="conv-customer-line"><span class="conv-customer-name">Aisha Khan&nbsp;</span></span>
+                                                                <span class="conv-email">aisha.khan@lumenlabs.example</span>
+                            </a>
+                        </td>
+                                        <td class="conv-attachment">
+                        <i role="button" tabindex="0" class="glyphicon conv-star  glyphicon-star-empty " title="Star Conversation"></i>
+                        
+                                                    &nbsp;
+                                            </td>
+                    <td class="conv-subject">
+                        <a href="https://freescout.example.com/conversation/4?folder_id=1" title="View conversation" >
+                            <span class="conv-fader"></span>
+                            <p>
+                                                                                                                                SSO setup with Okta returns invalid_audience                            </p>
+                            <p class="conv-preview">Internal: Lumen Labs is on the Enterprise plan, SSO was enabled by sales last week. Audience should be the workspace-specific URI (https://app.example.com/saml/lumenlabs), not the generic metadata URL. Needs someone with SSO admin access to confirm before</p>
+                        </a>
+                    </td>
+                    <td class="conv-thread-count">
+                        <i role="button" tabindex="0" class="glyphicon conv-star  glyphicon-star-empty " title="Star Conversation"></i>
+
+                        
+                    </td>
+                                            <td class="conv-owner">
+                             &nbsp;                        </td>
+                                                            <td class="conv-number">
+                        <a href="https://freescout.example.com/conversation/4?folder_id=1" title="View conversation" ><i>#</i>4</a>
+                    </td>
+                    <td class="conv-date">
+                        <a href="https://freescout.example.com/conversation/4?folder_id=1"  aria-label="1 day ago" aria-description="Created by Customer&lt;br/&gt;Oct 26, 2026 10:12" data-toggle="tooltip" data-html="true" data-placement="left" title="Created by Customer&lt;br/&gt;Oct 26, 2026 10:12" >1 day ago</a>
+                    </td>
+                </tr>
+                                            <tr class="conv-row   conv-active  " data-conversation_id="6">
+                    <td class="conv-current"></td>                                            <td class="conv-cb">
+                            <input type="checkbox" class="conv-checkbox magic-checkbox" id="cb-6" name="cb_6" value="6"><label for="cb-6"><span class="sr-only">Select Conversation: API rate limit hit at 100 req/min</span></label>
+                        </td>
+                                                                <td class="conv-customer">
+                            <a href="https://freescout.example.com/conversation/6?folder_id=3"  title="tom.becker@northwind.example">
+                                <span class="conv-customer-line"><span class="conv-customer-name">Tom Becker&nbsp;</span><span class="conv-counter">2</span></span>
+                                                                    <small class="conv-owner-mobile text-help">
+                                        Demo Admin <small class="glyphicon glyphicon-user"></small>
+                                    </small>
+                                                                <span class="conv-email">tom.becker@northwind.example</span>
+                            </a>
+                        </td>
+                                        <td class="conv-attachment">
+                        <i role="button" tabindex="0" class="glyphicon conv-star  glyphicon-star-empty " title="Star Conversation"></i>
+                        
+                                                    &nbsp;
+                                            </td>
+                    <td class="conv-subject">
+                        <a href="https://freescout.example.com/conversation/6?folder_id=3" title="View conversation" >
+                            <span class="conv-fader"></span>
+                            <p>
+                                                                                                                                API rate limit hit at 100 req/min                            </p>
+                            <p class="conv-preview">Hi Tom, Looking into this now. It looks like the limit on your API key was not updated when the contract changed. I&#039;ve asked engineering to raise it and will confirm shortly. Demo Admin</p>
+                        </a>
+                    </td>
+                    <td class="conv-thread-count">
+                        <i role="button" tabindex="0" class="glyphicon conv-star  glyphicon-star-empty " title="Star Conversation"></i>
+
+                        
+                    </td>
+                                            <td class="conv-owner">
+                            <a href="https://freescout.example.com/conversation/6?folder_id=3" title="View conversation" > Demo Admin </a>                        </td>
+                                                            <td class="conv-number">
+                        <a href="https://freescout.example.com/conversation/6?folder_id=3" title="View conversation" ><i>#</i>6</a>
+                    </td>
+                    <td class="conv-date">
+                        <a href="https://freescout.example.com/conversation/6?folder_id=3"  aria-label="1 day ago" aria-description="Last reply by User&lt;br/&gt;Oct 26, 2026 06:12" data-toggle="tooltip" data-html="true" data-placement="left" title="Last reply by User&lt;br/&gt;Oct 26, 2026 06:12" >1 day ago</a>
+                    </td>
+                </tr>
+                                    </tbody>
+                    <tfoot>
+                <tr>
+                    <td class="conv-totals" colspan="6">
+                                                    <strong>4</strong> conversations&nbsp;|&nbsp; 
+                                                                                                    <strong>1</strong>-<strong>4</strong>
+                                            </td>
+                    <td colspan="3" class="conv-nav">
+                        <div class="table-pager">
+                                                            
+                                                    </div>
+                    </td>
+                </tr>
+            </tfoot>
+            </table>
+
+	    	</div>
+                </div>
+            </div>
+        
+                    <div class="footer">
+                                    &copy; 2018-2026 <a href="https://freescout.net" target="blank">FreeScout</a> — Free open source help desk &amp; shared mailbox
+                                                
+                            </div>
+            </div>
+
+    <div id="loader-main"></div>
+
+    
+        
+    
+        <script src="https://freescout.example.com/js/builds/cf7c8164a6f5386a977279bc27ee85d926889270219.js"></script>
+
+                	    <script src="https://freescout.example.com/js/builds/da91ac0ab13ff38989371435032eef6f3585228898.js"></script>
+
+	    
+	    	    			    <script type="text/javascript"  nonce="C4yTGJ1rqLEfWiPxIF7qGCOQu">
+		    	flatpickr.defaultConfig.time_24hr = true;
+		    	if (typeof(flatpickr.l10ns['en']) != "undefined") {
+		    		flatpickr.localize(flatpickr.l10ns['en']);
+		    	}
+		    </script>
+			    <script type="text/javascript"  nonce="C4yTGJ1rqLEfWiPxIF7qGCOQu">
+                            searchInit();
+    conversationsTableInit();
+            </script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+{
+ "status": "success",
+ "msg": "",
+ "report": "<div class=\"rpt-metrics\">\n\n    <div class=\"rpt-metric\">\n    \t<div class=\"rpt-metric-title\">\n    \t\tRatings\n    \t</div>\n\t\t<div class=\"rpt-metric-value\">\n    \t\t2\n    \t\t<span class=\" rpt-metric-change  text-success\">\n\t\t+50%\n\t</span>\n    \t</div>\n    </div>\n\n\t<div class=\"rpt-metric\">\n    \t<div class=\"rpt-metric-title\">\n    \t\tGreat\n    \t</div>\n\t\t<div class=\"rpt-metric-value\">\n    \t\t1\n    \t\t<span class=\" rpt-metric-change  text-help\">\n\t\t0%\n\t</span>\n    \t</div>\n    </div>\n\n\t<div class=\"rpt-metric\">\n    \t<div class=\"rpt-metric-title\">\n    \t\tOkay\n    \t</div>\n\t\t<div class=\"rpt-metric-value\">\n    \t\t0\n    \t\t<span class=\" rpt-metric-change  text-help\">\n\t\t0%\n\t</span>\n    \t</div>\n    </div>\n    \n\t<div class=\"rpt-metric\">\n    \t<div class=\"rpt-metric-title\">\n    \t\tNot Good\n    \t</div>\n\t\t<div class=\"rpt-metric-value\">\n    \t\t1\n    \t\t<span class=\" rpt-metric-change  text-success\">\n\t\t+100%\n\t</span>\n    \t</div>\n    </div>\n\n\t<div class=\"rpt-metric\">\n    \t<div class=\"rpt-metric-title\">\n    \t\tSatisfaction Score\n    \t</div>\n\t\t<div class=\"rpt-metric-value\">\n    \t\t0\n    \t\t<span class=\" rpt-metric-change  text-help\">\n\t\t0%\n\t</span>\n    \t</div>\n    </div>\n\n</div>\n\n\n<div id=\"rpt-chart-container\">\n\t<div>\n\t\t<canvas id=\"rpt-chart\"></canvas>\n\t</div>\n</div>\n\n<div id=\"rpt-tables\">\n\t<div class=\"row\">\n\t\t\t\t\t<div class=\"col-md-12\">\n\t\t\t\t<table class=\"table table-striped\">\n\t\t\t\t\t<tr>\n\t\t\t\t\t\t<th>#</th>\n\t\t\t\t\t\t<th>Customer</th>\n\t\t\t\t\t\t<th>User</th>\n\t\t\t\t\t\t<th>Rating</th>\n\t\t\t\t\t\t<th>Comment</th>\n\t\t\t\t\t</tr>\n\t\t\t\t\t\t\t\t\t\t\t<tr>\n\t\t\t\t\t\t\t<td><a href=\"https://support.example.com/conversation/1001\" target=\"_blank\">#1001</a><br/><small class=\"text-help\">Oct 11, 2026 10:04pm</small></td>\n\t\t\t\t\t\t\t<td><a href=\"https://support.example.com/customers/201/edit\" target=\"_blank\">Customer 201</a></td>\n\t\t\t\t\t\t\t<td><button type=\"button\" data-uid=\"50\" class=\"btn btn-link btn-sm rpt-user-btn\">User 50</button></td>\n\t\t\t\t\t\t\t<td>\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t<span class=\"text-danger\">Not Good</span>\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t</td>\n\t\t\t\t\t\t\t<td>Comment text</td>\n\t\t\t\t\t\t</tr>\n\t\t\t\t\t\t\t\t\t\t\t<tr>\n\t\t\t\t\t\t\t<td><a href=\"https://support.example.com/conversation/1002\" target=\"_blank\">#1002</a><br/><small class=\"text-help\">Oct 9, 2026 03:38pm</small></td>\n\t\t\t\t\t\t\t<td><a href=\"https://support.example.com/customers/202/edit\" target=\"_blank\">Customer 202</a></td>\n\t\t\t\t\t\t\t<td><button type=\"button\" data-uid=\"49\" class=\"btn btn-link btn-sm rpt-user-btn\">User 49</button></td>\n\t\t\t\t\t\t\t<td>\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t<span class=\"text-success\">Great</span>\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t</td>\n\t\t\t\t\t\t\t<td>Comment text</td>\n\t\t\t\t\t\t</tr>\n\t\t\t\t\t\t\t\t\t</table>\n\t\t\t</div>\n\t\t\n\t</div>\n</div>\n",
+ "chart": {
+  "labels": [
+   "Good",
+   "Okay",
+   "Not Good"
+  ],
+  "datasets": [
+   {
+    "data": [
+     50,
+     0,
+     50
+    ],
+    "backgroundColor": [
+     "rgb(83,185,97)",
+     "rgb(147,161,175)",
+     "rgb(212,63,58)"
+    ]
+   }
+  ]
+ }
+}

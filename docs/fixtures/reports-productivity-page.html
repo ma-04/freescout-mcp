@@ -1,0 +1,702 @@
+<html lang="en"><head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex,nofollow">
+    
+    <!-- CSRF Token -->
+    <meta name="csrf-token" content="CSRFTOKEN">
+    <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'nonce-JG3VA1PJXMvpA7lgtySJXQlfo'  ;">
+        <title>Productivity Report - Freescout </title>
+
+    <link rel="apple-touch-icon" sizes="180x180" href="https://support.example.com/apple-touch-icon.png">
+    <link rel="shortcut icon" type="image/x-icon" href="https://support.example.com/favicon.ico">
+    <link rel="manifest" href="https://support.example.com/site.webmanifest" crossorigin="use-credentials">
+    <link rel="mask-icon" href="https://support.example.com/safari-pinned-tab.svg" color="#5bbad5">
+    <meta name="msapplication-TileColor" content="#da532c">
+    <meta name="theme-color" content="#ffffff">
+        
+    
+    
+        <link href="https://support.example.com//css/builds/649f8e861ea36645047c899068ada76131242208043.css" rel="stylesheet">
+
+    
+    		    	<link href="https://support.example.com/js/flatpickr/flatpickr.min.css" rel="stylesheet">
+    </head>
+<body class="locale-en     " data-auth_user_id="50">
+<div id="app">
+
+        
+            <nav class="navbar navbar-default navbar-static-top">
+                <div class="container">
+                    <div class="navbar-header">
+
+                        <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#app-navbar-collapse" aria-expanded="false">
+                            <span class="sr-only">Toggle Navigation</span>
+                            <span class="icon-bar"></span>
+                            <span class="icon-bar"></span>
+                            <span class="icon-bar"></span>
+                        </button>
+
+                                                    <a class="navbar-brand" href="https://support.example.com" title="Dashboard">
+                                <img src="https://support.example.com/img/logo-brand.svg" height="100%" alt="">
+                            </a>
+                                            </div>
+
+                    <div class="collapse navbar-collapse" id="app-navbar-collapse">
+                        <ul class="nav navbar-nav">
+                                                                                        <li class="dropdown ">
+                                    <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-expanded="false" aria-haspopup="true" v-pre="">
+                                        Mailbox <span class="caret"></span>
+                                    </a>
+                                    <ul class="dropdown-menu dm-scrollable">
+                                                                                    <li><a href="https://support.example.com/mailbox/18">Mailbox 18</a></li>
+                                                                                    <li><a href="https://support.example.com/mailbox/15">Mailbox 15</a></li>
+                                                                                    <li><a href="https://support.example.com/mailbox/21">Mailbox 21</a></li>
+                                                                            </ul>
+                                </li>
+                                                                                        <li class="dropdown ">
+                                    <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-expanded="false" aria-haspopup="true" v-pre="">
+                                        Manage <span class="caret"></span>
+                                    </a>
+
+                                    <ul class="dropdown-menu">
+                                                                                                                            <li class=""><a href="https://support.example.com/mailboxes">Mailboxes</a></li>
+                                                                                                    <li class=""><a href="https://support.example.com/tags">Tags</a></li>
+                <li class=""><a href="https://support.example.com/search?mode=customers&amp;xs_crm=1">Customers</a></li>                                                                                                                                                            </ul>
+                                </li>
+                                                        <li class="dropdown ">
+    <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-expanded="false" aria-haspopup="true" v-pre="">
+        Reports <span class="caret"></span>
+    </a>
+
+    <ul class="dropdown-menu">
+        <li class=""><a href="https://support.example.com/reports/conversations">Conversations Report</a></li>
+        <li class=""><a href="https://support.example.com/reports/productivity">Productivity Report</a></li>
+                	<li class=""><a href="https://support.example.com/reports/satisfaction">Satisfaction Report</a></li>
+                            <li class=""><a href="https://support.example.com/reports/time-tracking">Time Tracking Report</a></li>
+            </ul>
+</li>
+                        </ul>
+
+                        <!-- Right Side Of Navbar -->
+                        <ul class="nav navbar-nav navbar-right">
+                            <!-- Authentication Links -->
+                                                            <li class="dropdown web-notifications"><!-- removed from fixture --></li>
+
+
+                                <li class="dropdown">
+
+                                    <a href="#" class="dropdown-toggle dropdown-toggle-icon dropdown-toggle-account" data-toggle="dropdown" role="button" aria-expanded="false" aria-haspopup="true" v-pre="" title="Account" aria-label="Account">
+                                        <span class="photo-sm"><i class="person-photo person-photo-auto" data-initial="U5"></i></span>&nbsp;<span class="nav-user">User 50</span> <span class="caret"></span>
+                                    </a>
+
+                                    <ul class="dropdown-menu">
+                                        <li><a href="https://support.example.com/users/profile/50">Your Profile</a></li>
+                                                    <li><a href="https://freescout.net/module/keyboard-shortcuts/#shortcuts" target="_blank">Keyboard Shortcuts <small class="glyphicon glyphicon-question-sign"></small></a></li>
+                                                    <li class="divider"></li>
+                                        <li>
+                                            <a href="#" id="logout-link">
+                                                Log Out
+                                            </a>
+
+                                            <form id="logout-form" action="https://support.example.com/logout" method="POST" style="display: none;">
+                                                <input type="hidden" name="_token" value="CSRFTOKEN">
+                                            </form>
+                                        </li>
+                                        <li class="divider hidden in-app-switcher"></li>
+                                        <li>
+                                            <a href="#" class="hidden in-app-switcher">Switch Helpdesk URL</a>
+                                        </li>
+                                    </ul>
+                                </li>
+
+                                <li class="dropdown">
+                                    <a href="#" class="dropdown-toggle dropdown-toggle-icon" data-toggle="dropdown" role="button" aria-expanded="false" aria-haspopup="true" v-pre="" title="Search" aria-label="Search" id="search-dt">
+                                        <i class="glyphicon glyphicon-search"></i>
+                                    </a>
+
+                                    <ul class="dropdown-menu dropdown-with-icons">
+                                        <li>
+                                            <form class="form-inline form-nav-search" role="form" action="https://support.example.com/search" target="_blank">
+                                                <div class="input-group">
+                                                    <input type="text" class="form-control" name="q">
+                                                    <span class="input-group-btn">
+                                                        <button class="btn btn-default" type="submit">Search</button>
+                                                    </span>
+                                                </div>
+                                            </form>
+                                        </li>
+                                        <li><a href="https://support.example.com/search?f%5Bfollowing%5D=yes"><i class="glyphicon glyphicon-chevron-right"></i> Conversations I'm following</a></li>
+                                        <li><a href="https://support.example.com/search?f%5Bassigned%5D=50&amp;f%5Bstatus%5D%5B0%5D=1&amp;f%5Bstatus%5D%5B1%5D=2"><i class="glyphicon glyphicon-chevron-right"></i> My open conversations</a></li>
+                                                                            </ul>
+                                </li>
+                                                    </ul>
+                    </div>
+                </div>
+            </nav>
+        
+                    <div class="content content-full">
+                <div class="container">
+    <div class="rpt-header">
+        <form id="rpt-filters">
+        	<div class="rpt-title">Productivity Report</div>
+        	<div class="rpt-filters">
+
+	
+	
+	<div class="rpt-filter">
+		Type 
+		<select class="form-control" name="type">
+			<option value=""></option>
+			<option value="1">Email</option>
+			<option value="3">Chat</option>
+			<option value="2">Phone</option>
+		</select>
+	</div>
+	<div class="rpt-filter">
+		Mailbox 
+		<select class="form-control" name="mailbox">
+			<option value=""></option>
+							<option value="18">Mailbox 18</option>
+							<option value="15">Mailbox 15</option>
+							<option value="21">Mailbox 21</option>
+					</select>
+	</div>
+			<div class="rpt-filter">
+			User 
+			<select class="form-control select2-hidden-accessible" name="user" tabindex="-1" aria-hidden="true">
+				<option value="" disabled="disabled">All Users</option>
+									<option value="34" data-mailboxes="15">User 34</option>
+									<option value="5" data-mailboxes="5,15,11,13,3">User 5</option>
+									<option value="9" data-mailboxes="5,19,12,18,15,25,22,10,9,23,21,20,16,26,24,11,6,17,14,7,13,8,3">User 9</option>
+									<option value="69" data-mailboxes="5,19,12,18,15,25,22,10,9,23,21,20,16,26,24,11,6,17,14,7,13,8,3">User 69</option>
+									<option value="57" data-mailboxes="21" disabled="disabled">User 57</option>
+									<option value="15" data-mailboxes="5,19,12,18,15,25,22,10,9,23,21,20,16,26,24,11,6,17,14,7,13,8,3">User 15</option>
+									<option value="28" data-mailboxes="5,19,12,18,15,25,22,10,9,23,21,20,16,26,24,11,6,17,14,7,13,8,3">User 28</option>
+									<option value="47" data-mailboxes="5,19,12,18,15,25,22,10,9,23,21,20,16,26,24,11,6,17,14,7,13,8,3">User 47</option>
+									<option value="56" data-mailboxes="21" disabled="disabled">User 56</option>
+									<option value="50" data-mailboxes="18,15,21">User 50</option>
+									<option value="49" data-mailboxes="5,18,15,21,3">User 49</option>
+									<option value="52" data-mailboxes="12,18,25,16,24,11,17,7,13,3" disabled="disabled">User 52</option>
+									<option value="70" data-mailboxes="21" disabled="disabled">User 70</option>
+									<option value="59" data-mailboxes="21" disabled="disabled">User 59</option>
+									<option value="53" data-mailboxes="22,23,21" disabled="disabled">User 53</option>
+									<option value="6" data-mailboxes="5,19,12,18,15,25,22,10,9,23,21,20,16,26,24,11,6,17,14,7,13,8,3">User 6</option>
+									<option value="42" data-mailboxes="15,3">User 42</option>
+									<option value="58" data-mailboxes="21" disabled="disabled">User 58</option>
+									<option value="35" data-mailboxes="15">User 35</option>
+									<option value="62" data-mailboxes="5,19,12,18,15,25,22,10,9,23,21,20,16,26,24,11,6,17,14,7,13,8,3">User 62</option>
+									<option value="54" data-mailboxes="23,21" disabled="disabled">User 54</option>
+									<option value="27" data-mailboxes="12,18,24,17,13" disabled="disabled">User 27</option>
+									<option value="41" data-mailboxes="12,15">User 41</option>
+									<option value="1" data-mailboxes="5,19,12,18,15,25,22,10,9,23,21,20,16,26,24,11,6,17,14,7,13,8,3">User 1</option>
+									<option value="30" data-mailboxes="19,12,18,11,7,13" disabled="disabled">User 30</option>
+							</select></span><span class="dropdown-wrapper" aria-hidden="true"></span></span>
+		</div>
+				<div class="rpt-filter">
+    		Tag 
+    		<select class="form-control" name="tag">
+			<option value=""></option>
+				<option value="1302">tag-1302</option>
+				<option value="4036">tag-4036</option>
+				<option value="4549">tag-4549</option>
+		</select>
+    	</div>
+    
+	<div class="rpt-filter">
+		<select class="form-control" name="period">
+			<option value="custom">Custom</option>
+			<option value="today">Today</option>
+			<option value="yesterday">Yesterday</option>
+			<option value="last_7">Last 7 days</option>
+			<option value="last_week">Last Week</option>
+			<option value="this_month">This Month</option>
+			<option value="last_month">Last Month</option>
+			<option value="last_12_months">Last 12 Months</option>
+			<option value="this_year">This Year</option>
+		</select>
+		<nobr><input type="text" name="from" class="form-control rpt-filter-date flatpickr-input" value="2026-10-21" readonly="readonly">-<input type="text" name="to" class="form-control rpt-filter-date flatpickr-input" value="2026-10-28" readonly="readonly"></nobr>
+		
+	</div>
+	
+
+	<div class="rpt-filter rpt-filter-btn" data-toggle="tooltip" title="" data-original-title="Refresh">
+		<button class="btn btn-primary" id="rpt-btn-loader"><i class="glyphicon glyphicon-refresh"></i></button>
+	</div>
+	<div class="rpt-filter rpt-filter-btn" data-toggle="tooltip" title="" data-original-title="Clear Filters">
+		<button class="btn btn-default" id="rpt-btn-clear"><i class="glyphicon glyphicon-remove"></i></button>
+	</div>
+
+	</div>
+
+
+        </form>
+    </div>
+
+    <div id="rpt-report" data-report-name="productivity"><div class="rpt-metrics">
+
+    <div class="rpt-metric">
+    	<div class="rpt-metric-title">
+    		Customers Helped&nbsp;<i class="glyphicon glyphicon-question-sign" data-toggle="tooltip" title="" data-original-title="Number of customers who received replies from support agents."></i>
+    	</div>
+		<div class="rpt-metric-value">
+    		86
+    		<span class=" rpt-metric-change  text-danger">
+		-47%
+	</span>
+    	</div>
+    </div>
+
+	<div class="rpt-metric">
+    	<div class="rpt-metric-title">
+    		Replies Sent&nbsp;<i class="glyphicon glyphicon-question-sign" data-toggle="tooltip" title="" data-original-title="Number of replies sent from users to customers including new conversations."></i>
+    	</div>
+		<div class="rpt-metric-value">
+    		214
+    		<span class=" rpt-metric-change  text-success">
+		+2%
+	</span>
+    	</div>
+    </div>
+
+	<div class="rpt-metric">
+    	<div class="rpt-metric-title">
+    		Replies per Day&nbsp;<i class="glyphicon glyphicon-question-sign" data-toggle="tooltip" title="" data-original-title="Average number of replies sent by users per day."></i>
+    	</div>
+		<div class="rpt-metric-value">
+    		8
+    		<span class=" rpt-metric-change  text-danger">
+		-13%
+	</span>
+    	</div>
+    </div>
+    
+	<div class="rpt-metric">
+    	<div class="rpt-metric-title">
+    		Closed&nbsp;<i class="glyphicon glyphicon-question-sign" data-toggle="tooltip" title="" data-original-title="Number of closed conversations."></i>
+    	</div>
+		<div class="rpt-metric-value">
+    		364
+    		<span class=" rpt-metric-change  text-danger">
+		-12%
+	</span>
+    	</div>
+    </div>
+
+	<div class="rpt-metric">
+    	<div class="rpt-metric-title">
+    		Resolved On First Reply&nbsp;<i class="glyphicon glyphicon-question-sign" data-toggle="tooltip" title="" data-original-title="Number of closed conversations resolved on first reply."></i>
+    	</div>
+		<div class="rpt-metric-value">
+    		14
+    		<span class=" rpt-metric-change  text-success">
+		+14%
+	</span>
+    	</div>
+    </div>
+
+</div>
+
+
+<div id="rpt-chart-container">
+	<div id="rpt-options">
+		<div class="row">
+			<div class="col-md-6">
+	    		<select class="form-control rpt-option" id="rpt-chart-type">
+	    			<option value="customers_helped" selected="">Customers Helped</option>
+	    			<option value="replies">Replies Sent</option>
+	    			<option value="closed">Closed</option>
+	    		</select>
+	    	</div>
+	    	<div class="col-md-6">
+				<div class="btn-group btn-group-justified rpt-option" id="rpt-group-by">
+											<div class="btn-group" role="group">
+							<button type="button" value="d" class="btn btn-default  active ">Day</button>
+						</div>
+																<div class="btn-group" role="group">
+							<button type="button" value="w" class="btn btn-default ">Week</button>
+						</div>
+														</div>
+			</div>
+		</div>
+	</div>
+	<div>
+		<canvas id="rpt-chart" width="2400" height="700" style="display: block; box-sizing: border-box; height: 350px; width: 1200px;"></canvas>
+	</div>
+</div>
+
+<div id="rpt-tables">
+	<div class="row">
+		<div class="col-md-6">
+			<table class="table table-striped">
+				<tbody><tr>
+					<th>First Response Time</th>
+					<th>%</th>
+					<th>Δ</th>
+				</tr>
+														<tr>
+						<td>&lt; 15 min</td>
+						<td>1%</td>
+						<td><span class=" text-danger">
+		-300%
+	</span>
+</td>
+					</tr>
+														<tr>
+						<td>15-30 min</td>
+						<td>3%</td>
+						<td><span class=" text-success">
+		+33%
+	</span>
+</td>
+					</tr>
+														<tr>
+						<td>30-60 min</td>
+						<td>13%</td>
+						<td><span class=" text-success">
+		+85%
+	</span>
+</td>
+					</tr>
+														<tr>
+						<td>1-2 hours</td>
+						<td>3%</td>
+						<td><span class=" text-danger">
+		-200%
+	</span>
+</td>
+					</tr>
+														<tr>
+						<td>2-3 hours</td>
+						<td>3%</td>
+						<td><span class=" text-success">
+		+100%
+	</span>
+</td>
+					</tr>
+														<tr>
+						<td>3-6 hours</td>
+						<td>16%</td>
+						<td><span class=" text-success">
+		+31%
+	</span>
+</td>
+					</tr>
+														<tr>
+						<td>6-12 hours</td>
+						<td>16%</td>
+						<td><span class=" text-danger">
+		-106%
+	</span>
+</td>
+					</tr>
+														<tr>
+						<td>12-24 hours</td>
+						<td>24%</td>
+						<td><span class=" text-danger">
+		-13%
+	</span>
+</td>
+					</tr>
+														<tr>
+						<td>1-2 days</td>
+						<td>16%</td>
+						<td><span class=" text-success">
+		+31%
+	</span>
+</td>
+					</tr>
+														<tr>
+						<td>&gt; 2 days</td>
+						<td>4%</td>
+						<td><span class=" text-success">
+		+50%
+	</span>
+</td>
+					</tr>
+																				<tr>
+						<td><i>Avg.</i></td>
+						<td colspan="2"><i>8 h 32 min</i></td>
+					</tr>
+			</tbody></table>
+		</div>
+		<div class="col-md-6">
+			<table class="table table-striped">
+				<tbody><tr>
+					<th>Response Time</th>
+					<th>%</th>
+					<th>Δ</th>
+				</tr>
+														<tr>
+						<td>&lt; 15 min</td>
+						<td>1%</td>
+						<td><span class=" text-danger">
+		-300%
+	</span>
+</td>
+					</tr>
+														<tr>
+						<td>15-30 min</td>
+						<td>4%</td>
+						<td><span class=" text-success">
+		+100%
+	</span>
+</td>
+					</tr>
+														<tr>
+						<td>30-60 min</td>
+						<td>12%</td>
+						<td><span class=" text-success">
+		+100%
+	</span>
+</td>
+					</tr>
+														<tr>
+						<td>1-2 hours</td>
+						<td>4%</td>
+						<td><span class=" text-danger">
+		-75%
+	</span>
+</td>
+					</tr>
+														<tr>
+						<td>2-3 hours</td>
+						<td>1%</td>
+						<td><span class=" text-danger">
+		-100%
+	</span>
+</td>
+					</tr>
+														<tr>
+						<td>3-6 hours</td>
+						<td>13%</td>
+						<td><span class=" text-success">
+		+31%
+	</span>
+</td>
+					</tr>
+														<tr>
+						<td>6-12 hours</td>
+						<td>19%</td>
+						<td><span class=" text-danger">
+		-68%
+	</span>
+</td>
+					</tr>
+														<tr>
+						<td>12-24 hours</td>
+						<td>26%</td>
+						<td><span class=" text-success">
+		+23%
+	</span>
+</td>
+					</tr>
+														<tr>
+						<td>1-2 days</td>
+						<td>13%</td>
+						<td><span class=" text-danger">
+		-8%
+	</span>
+</td>
+					</tr>
+														<tr>
+						<td>&gt; 2 days</td>
+						<td>4%</td>
+						<td><span class=" text-danger">
+		-225%
+	</span>
+</td>
+					</tr>
+																				<tr>
+						<td><i>Avg.</i></td>
+						<td colspan="2"><i>8 h 55 min</i></td>
+					</tr>
+			</tbody></table>
+		</div>
+	</div>
+
+			<div class="row">
+			<div class="col-md-6">
+				<table class="table table-striped">
+					<tbody><tr>
+						<th>Resolution Time</th>
+						<th>%</th>
+						<th>Δ</th>
+					</tr>
+																	<tr>
+							<td>15-30 min</td>
+							<td>4%</td>
+							<td><span class=" text-danger">
+		-275%
+	</span>
+</td>
+						</tr>
+																	<tr>
+							<td>30-60 min</td>
+							<td>15%</td>
+							<td><span class=" text-success">
+		+100%
+	</span>
+</td>
+						</tr>
+																	<tr>
+							<td>1-2 hours</td>
+							<td>4%</td>
+							<td><span class=" text-help">
+		0%
+	</span>
+</td>
+						</tr>
+																	<tr>
+							<td>2-3 hours</td>
+							<td>4%</td>
+							<td><span class=" text-danger">
+		-100%
+	</span>
+</td>
+						</tr>
+																	<tr>
+							<td>3-6 hours</td>
+							<td>19%</td>
+							<td><span class=" text-success">
+		+79%
+	</span>
+</td>
+						</tr>
+																	<tr>
+							<td>6-12 hours</td>
+							<td>7%</td>
+							<td><span class=" text-danger">
+		-14%
+	</span>
+</td>
+						</tr>
+																	<tr>
+							<td>12-24 hours</td>
+							<td>22%</td>
+							<td><span class=" text-success">
+		+45%
+	</span>
+</td>
+						</tr>
+																	<tr>
+							<td>1-2 days</td>
+							<td>15%</td>
+							<td><span class=" text-success">
+		+20%
+	</span>
+</td>
+						</tr>
+																	<tr>
+							<td>&gt; 2 days</td>
+							<td>11%</td>
+							<td><span class=" text-danger">
+		-182%
+	</span>
+</td>
+						</tr>
+																								<tr>
+							<td><i>Avg.</i></td>
+							<td colspan="2"><i>11 h 23 min</i></td>
+						</tr>
+				</tbody></table>
+			</div>
+			<div class="col-md-6">
+				<table class="table table-striped">
+					<tbody><tr>
+						<th>Replies To Resolve</th>
+						<th>%</th>
+						<th>Δ</th>
+					</tr>
+																	<tr>
+							<td>1</td>
+							<td>78%</td>
+							<td><span class=" text-success">
+		+4%
+	</span>
+</td>
+						</tr>
+																	<tr>
+							<td>2</td>
+							<td>17%</td>
+							<td><span class=" text-danger">
+		-12%
+	</span>
+</td>
+						</tr>
+																	<tr>
+							<td>4</td>
+							<td>6%</td>
+							<td><span class=" text-success">
+		+100%
+	</span>
+</td>
+						</tr>
+																								<tr>
+							<td><i>Avg.</i></td>
+							<td colspan="2"><i>1.33</i></td>
+						</tr>
+				</tbody></table>
+			</div>
+		</div>
+	
+	<div class="row">
+					<div class="col-md-12">
+				<table class="table table-striped">
+					<tbody><tr>
+						<th>User</th>
+						<th>Replies Sent</th>
+						<th>Closed</th>
+						<th>Customers Helped</th>
+						<th>Satisfaction Score</th>					</tr>
+																		<tr>
+								<td><button type="button" data-uid="50" class="btn btn-link btn-sm rpt-user-btn">User 50</button></td>
+								<td>170</td>
+								<td>288</td>
+								<td>61</td>
+								<td>0</td>							</tr>
+																								<tr>
+								<td><button type="button" data-uid="49" class="btn btn-link btn-sm rpt-user-btn">User 49</button></td>
+								<td>44</td>
+								<td>77</td>
+								<td>34</td>
+								<td>0</td>							</tr>
+															</tbody></table>
+			</div>
+			</div>
+</div>
+</div>
+</div>
+            </div>
+        
+                    <div class="footer">
+                                    © 2018-2026 <a href="https://freescout.net" target="blank">Freescout</a> — Free open source help desk &amp; shared mailbox
+                                                
+                            </div>
+            </div>
+
+    <div id="loader-main"></div>
+
+    
+            <script src="https://support.example.com/modules/reports/js/chart.js"></script>    
+    
+        <script src="https://support.example.com//js/builds/bcf4bb63173163a5caca0d1a974e26a781922025502.js"></script>
+
+                	    <script src="https://support.example.com//js/builds/da91ac0ab13ff38989371435032eef6f3466202796.js"></script>
+
+	    
+	    	    <script type="text/javascript" nonce="JG3VA1PJXMvpA7lgtySJXQlfo">
+                        initReports();
+        initTagsBulk();crmInitVars({});initWorkflowsBulk();    </script>
+
+
+<div class="flatpickr-calendar animate showTimeInput" tabindex="-1"><div class="flatpickr-months"><span class="flatpickr-prev-month"><svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 17 17"><g></g><path d="M5.207 8.471l7.146 7.147-0.707 0.707-7.853-7.854 7.854-7.853 0.707 0.707-7.147 7.146z"></path></svg></span><div class="flatpickr-month"><div class="flatpickr-current-month"><select class="flatpickr-monthDropdown-months" tabindex="-1"><option class="flatpickr-monthDropdown-month" value="0" tabindex="-1">January</option><option class="flatpickr-monthDropdown-month" value="1" tabindex="-1">February</option><option class="flatpickr-monthDropdown-month" value="2" tabindex="-1">March</option><option class="flatpickr-monthDropdown-month" value="3" tabindex="-1">April</option><option class="flatpickr-monthDropdown-month" value="4" tabindex="-1">May</option><option class="flatpickr-monthDropdown-month" value="5" tabindex="-1">June</option><option class="flatpickr-monthDropdown-month" value="6" tabindex="-1">July</option><option class="flatpickr-monthDropdown-month" value="7" tabindex="-1">August</option><option class="flatpickr-monthDropdown-month" value="8" tabindex="-1">September</option><option class="flatpickr-monthDropdown-month" value="9" tabindex="-1">October</option><option class="flatpickr-monthDropdown-month" value="10" tabindex="-1">November</option><option class="flatpickr-monthDropdown-month" value="11" tabindex="-1">December</option></select><div class="numInputWrapper"><input class="numInput cur-year" type="number" tabindex="-1" aria-label="Year"><span class="arrowUp"></span><span class="arrowDown"></span></div></div></div><span class="flatpickr-next-month"><svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 17 17"><g></g><path d="M13.207 8.472l-7.854 7.854-0.707-0.707 7.146-7.146-7.146-7.148 0.707-0.707 7.854 7.854z"></path></svg></span></div><div class="flatpickr-innerContainer"><div class="flatpickr-rContainer"><div class="flatpickr-weekdays"><div class="flatpickr-weekdaycontainer">
+      <span class="flatpickr-weekday">
+        Sun</span><span class="flatpickr-weekday">Mon</span><span class="flatpickr-weekday">Tue</span><span class="flatpickr-weekday">Wed</span><span class="flatpickr-weekday">Thu</span><span class="flatpickr-weekday">Fri</span><span class="flatpickr-weekday">Sat
+      </span>
+      </div></div><div class="flatpickr-days" tabindex="-1"><div class="dayContainer"><span class="flatpickr-day prevMonthDay" aria-label="September 27, 2026" tabindex="-1">27</span><span class="flatpickr-day prevMonthDay" aria-label="September 28, 2026" tabindex="-1">28</span><span class="flatpickr-day prevMonthDay" aria-label="September 29, 2026" tabindex="-1">29</span><span class="flatpickr-day prevMonthDay" aria-label="September 30, 2026" tabindex="-1">30</span><span class="flatpickr-day " aria-label="October 1, 2026" tabindex="-1">1</span><span class="flatpickr-day " aria-label="October 2, 2026" tabindex="-1">2</span><span class="flatpickr-day " aria-label="October 3, 2026" tabindex="-1">3</span><span class="flatpickr-day " aria-label="October 4, 2026" tabindex="-1">4</span><span class="flatpickr-day " aria-label="October 5, 2026" tabindex="-1">5</span><span class="flatpickr-day " aria-label="October 6, 2026" tabindex="-1">6</span><span class="flatpickr-day " aria-label="October 7, 2026" tabindex="-1">7</span><span class="flatpickr-day " aria-label="October 8, 2026" tabindex="-1">8</span><span class="flatpickr-day " aria-label="October 9, 2026" tabindex="-1">9</span><span class="flatpickr-day " aria-label="October 10, 2026" tabindex="-1">10</span><span class="flatpickr-day " aria-label="October 11, 2026" tabindex="-1">11</span><span class="flatpickr-day " aria-label="October 12, 2026" tabindex="-1">12</span><span class="flatpickr-day " aria-label="October 13, 2026" tabindex="-1">13</span><span class="flatpickr-day " aria-label="October 14, 2026" tabindex="-1">14</span><span class="flatpickr-day " aria-label="October 15, 2026" tabindex="-1">15</span><span class="flatpickr-day " aria-label="October 16, 2026" tabindex="-1">16</span><span class="flatpickr-day " aria-label="October 17, 2026" tabindex="-1">17</span><span class="flatpickr-day " aria-label="October 18, 2026" tabindex="-1">18</span><span class="flatpickr-day " aria-label="October 19, 2026" tabindex="-1">19</span><span class="flatpickr-day " aria-label="October 20, 2026" tabindex="-1">20</span><span class="flatpickr-day selected" aria-label="October 21, 2026" tabindex="-1">21</span><span class="flatpickr-day " aria-label="October 22, 2026" tabindex="-1">22</span><span class="flatpickr-day " aria-label="October 23, 2026" tabindex="-1">23</span><span class="flatpickr-day " aria-label="October 24, 2026" tabindex="-1">24</span><span class="flatpickr-day " aria-label="October 25, 2026" tabindex="-1">25</span><span class="flatpickr-day " aria-label="October 26, 2026" tabindex="-1">26</span><span class="flatpickr-day " aria-label="October 27, 2026" tabindex="-1">27</span><span class="flatpickr-day today" aria-label="October 28, 2026" aria-current="date" tabindex="-1">28</span><span class="flatpickr-day " aria-label="October 29, 2026" tabindex="-1">29</span><span class="flatpickr-day " aria-label="October 30, 2026" tabindex="-1">30</span><span class="flatpickr-day " aria-label="October 31, 2026" tabindex="-1">31</span><span class="flatpickr-day nextMonthDay" aria-label="November 1, 2026" tabindex="-1">1</span><span class="flatpickr-day nextMonthDay" aria-label="November 2, 2026" tabindex="-1">2</span><span class="flatpickr-day nextMonthDay" aria-label="November 3, 2026" tabindex="-1">3</span><span class="flatpickr-day nextMonthDay" aria-label="November 4, 2026" tabindex="-1">4</span><span class="flatpickr-day nextMonthDay" aria-label="November 5, 2026" tabindex="-1">5</span><span class="flatpickr-day nextMonthDay" aria-label="November 6, 2026" tabindex="-1">6</span><span class="flatpickr-day nextMonthDay" aria-label="November 7, 2026" tabindex="-1">7</span></div></div></div></div></div><div class="flatpickr-calendar animate showTimeInput" tabindex="-1"><div class="flatpickr-months"><span class="flatpickr-prev-month"><svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 17 17"><g></g><path d="M5.207 8.471l7.146 7.147-0.707 0.707-7.853-7.854 7.854-7.853 0.707 0.707-7.147 7.146z"></path></svg></span><div class="flatpickr-month"><div class="flatpickr-current-month"><select class="flatpickr-monthDropdown-months" tabindex="-1"><option class="flatpickr-monthDropdown-month" value="0" tabindex="-1">January</option><option class="flatpickr-monthDropdown-month" value="1" tabindex="-1">February</option><option class="flatpickr-monthDropdown-month" value="2" tabindex="-1">March</option><option class="flatpickr-monthDropdown-month" value="3" tabindex="-1">April</option><option class="flatpickr-monthDropdown-month" value="4" tabindex="-1">May</option><option class="flatpickr-monthDropdown-month" value="5" tabindex="-1">June</option><option class="flatpickr-monthDropdown-month" value="6" tabindex="-1">July</option><option class="flatpickr-monthDropdown-month" value="7" tabindex="-1">August</option><option class="flatpickr-monthDropdown-month" value="8" tabindex="-1">September</option><option class="flatpickr-monthDropdown-month" value="9" tabindex="-1">October</option><option class="flatpickr-monthDropdown-month" value="10" tabindex="-1">November</option><option class="flatpickr-monthDropdown-month" value="11" tabindex="-1">December</option></select><div class="numInputWrapper"><input class="numInput cur-year" type="number" tabindex="-1" aria-label="Year"><span class="arrowUp"></span><span class="arrowDown"></span></div></div></div><span class="flatpickr-next-month"><svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 17 17"><g></g><path d="M13.207 8.472l-7.854 7.854-0.707-0.707 7.146-7.146-7.146-7.148 0.707-0.707 7.854 7.854z"></path></svg></span></div><div class="flatpickr-innerContainer"><div class="flatpickr-rContainer"><div class="flatpickr-weekdays"><div class="flatpickr-weekdaycontainer">
+      <span class="flatpickr-weekday">
+        Sun</span><span class="flatpickr-weekday">Mon</span><span class="flatpickr-weekday">Tue</span><span class="flatpickr-weekday">Wed</span><span class="flatpickr-weekday">Thu</span><span class="flatpickr-weekday">Fri</span><span class="flatpickr-weekday">Sat
+      </span>
+      </div></div><div class="flatpickr-days" tabindex="-1"><div class="dayContainer"><span class="flatpickr-day prevMonthDay" aria-label="September 27, 2026" tabindex="-1">27</span><span class="flatpickr-day prevMonthDay" aria-label="September 28, 2026" tabindex="-1">28</span><span class="flatpickr-day prevMonthDay" aria-label="September 29, 2026" tabindex="-1">29</span><span class="flatpickr-day prevMonthDay" aria-label="September 30, 2026" tabindex="-1">30</span><span class="flatpickr-day " aria-label="October 1, 2026" tabindex="-1">1</span><span class="flatpickr-day " aria-label="October 2, 2026" tabindex="-1">2</span><span class="flatpickr-day " aria-label="October 3, 2026" tabindex="-1">3</span><span class="flatpickr-day " aria-label="October 4, 2026" tabindex="-1">4</span><span class="flatpickr-day " aria-label="October 5, 2026" tabindex="-1">5</span><span class="flatpickr-day " aria-label="October 6, 2026" tabindex="-1">6</span><span class="flatpickr-day " aria-label="October 7, 2026" tabindex="-1">7</span><span class="flatpickr-day " aria-label="October 8, 2026" tabindex="-1">8</span><span class="flatpickr-day " aria-label="October 9, 2026" tabindex="-1">9</span><span class="flatpickr-day " aria-label="October 10, 2026" tabindex="-1">10</span><span class="flatpickr-day " aria-label="October 11, 2026" tabindex="-1">11</span><span class="flatpickr-day " aria-label="October 12, 2026" tabindex="-1">12</span><span class="flatpickr-day " aria-label="October 13, 2026" tabindex="-1">13</span><span class="flatpickr-day " aria-label="October 14, 2026" tabindex="-1">14</span><span class="flatpickr-day " aria-label="October 15, 2026" tabindex="-1">15</span><span class="flatpickr-day " aria-label="October 16, 2026" tabindex="-1">16</span><span class="flatpickr-day " aria-label="October 17, 2026" tabindex="-1">17</span><span class="flatpickr-day " aria-label="October 18, 2026" tabindex="-1">18</span><span class="flatpickr-day " aria-label="October 19, 2026" tabindex="-1">19</span><span class="flatpickr-day " aria-label="October 20, 2026" tabindex="-1">20</span><span class="flatpickr-day " aria-label="October 21, 2026" tabindex="-1">21</span><span class="flatpickr-day " aria-label="October 22, 2026" tabindex="-1">22</span><span class="flatpickr-day " aria-label="October 23, 2026" tabindex="-1">23</span><span class="flatpickr-day " aria-label="October 24, 2026" tabindex="-1">24</span><span class="flatpickr-day " aria-label="October 25, 2026" tabindex="-1">25</span><span class="flatpickr-day " aria-label="October 26, 2026" tabindex="-1">26</span><span class="flatpickr-day " aria-label="October 27, 2026" tabindex="-1">27</span><span class="flatpickr-day today selected" aria-label="October 28, 2026" aria-current="date" tabindex="-1">28</span><span class="flatpickr-day " aria-label="October 29, 2026" tabindex="-1">29</span><span class="flatpickr-day " aria-label="October 30, 2026" tabindex="-1">30</span><span class="flatpickr-day " aria-label="October 31, 2026" tabindex="-1">31</span><span class="flatpickr-day nextMonthDay" aria-label="November 1, 2026" tabindex="-1">1</span><span class="flatpickr-day nextMonthDay" aria-label="November 2, 2026" tabindex="-1">2</span><span class="flatpickr-day nextMonthDay" aria-label="November 3, 2026" tabindex="-1">3</span><span class="flatpickr-day nextMonthDay" aria-label="November 4, 2026" tabindex="-1">4</span><span class="flatpickr-day nextMonthDay" aria-label="November 5, 2026" tabindex="-1">5</span><span class="flatpickr-day nextMonthDay" aria-label="November 6, 2026" tabindex="-1">6</span><span class="flatpickr-day nextMonthDay" aria-label="November 7, 2026" tabindex="-1">7</span></div></div></div></div></div></body></html>

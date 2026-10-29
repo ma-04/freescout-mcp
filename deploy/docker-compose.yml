@@ -1,0 +1,30 @@
+# freescout-mcp (Streamable HTTP) on a Tailscale-only host. See deploy/README.md.
+# Run from this directory's copy on the server (~/freescout-mcp/), next to its .env.
+services:
+  freescout-mcp:
+    build:
+      context: ./src-tree
+    image: freescout-mcp:local
+    container_name: freescout-mcp
+    restart: always
+    env_file: .env
+    environment:
+      # The process listens on 0.0.0.0 inside the container; the only published port is the one below,
+      # bound to the Tailscale IP, so the public interface never serves it.
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "8787"
+      MCP_ALLOW_PUBLIC_BIND: "1"
+    ports:
+      - "${BIND_IP:?set BIND_IP in .env}:${MCP_PORT:-8787}:8787"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en" >
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <meta name="robots" content="noindex,nofollow">
+    
+    <!-- CSRF Token -->
+    <meta name="csrf-token" content="CSRF_TOKEN_REDACTED">
+    <meta http-equiv="Content-Security-Policy" content="base-uri 'none'; default-src 'self' ; img-src * 'self' data:; font-src * 'self' data:; style-src * 'self' 'unsafe-inline'; form-action 'self' ; frame-src * 'self' data:; script-src 'self' 'nonce-a5qSKeQdXUd9fMR6BdOhLn6D3'  ;">
+        <title>Dashboard - FreeScout </title>
+
+    <link rel="apple-touch-icon" sizes="180x180" href="https://freescout.example.com/apple-touch-icon.png">
+    <link rel="shortcut icon" type="image/x-icon" href="https://freescout.example.com/favicon.ico">
+    <link rel="manifest" href="https://freescout.example.com/site.webmanifest" crossorigin="use-credentials">
+    <link rel="mask-icon" href="https://freescout.example.com/safari-pinned-tab.svg" color="#5bbad5">
+    <meta name="msapplication-TileColor" content="#da532c">
+    <meta name="theme-color" content="#ffffff">
+        
+    
+    
+        <link href="https://freescout.example.com/css/builds/552811eceab9804ff8d211d76b95055a12548301143.css" rel="stylesheet">
+
+    
+    </head>
+<body class="locale-en     "   data-auth_user_id="2" >
+<div id="app">
+
+        
+            <nav class="navbar navbar-default navbar-static-top">
+                <div class="container">
+                    <div class="navbar-header">
+
+                        <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#app-navbar-collapse" aria-expanded="false">
+                            <span class="sr-only">Toggle Navigation</span>
+                            <span class="icon-bar"></span>
+                            <span class="icon-bar"></span>
+                            <span class="icon-bar"></span>
+                        </button>
+
+                                                    <a class="navbar-brand" href="https://freescout.example.com" title="Dashboard">
+                                <img src="https://freescout.example.com/img/logo-brand.svg" height="100%" alt="" />
+                            </a>
+                                            </div>
+
+                    <div class="collapse navbar-collapse" id="app-navbar-collapse">
+                        <ul class="nav navbar-nav">
+                                                                                        <li class=""><a href="https://freescout.example.com/mailbox/1">Mailbox</a></li>
+                                                                                        <li class="dropdown ">
+                                    <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-expanded="false" aria-haspopup="true" v-pre>
+                                        Manage <span class="caret"></span>
+                                    </a>
+
+                                    <ul class="dropdown-menu">
+                                                                                                                            <li class=""><a href="https://freescout.example.com/mailboxes">Mailboxes</a></li>
+                                                                                                                                                                                                                                            </ul>
+                                </li>
+                                                                                </ul>
+
+                        <!-- Right Side Of Navbar -->
+                        <ul class="nav navbar-nav navbar-right">
+                            <!-- Authentication Links -->
+                                                            <li class="dropdown web-notifications">
+                                                                        <a href="#" class="dropdown-toggle dropdown-toggle-icon " data-toggle="dropdown" role="button" aria-expanded="false" aria-haspopup="true" aria-label="Notifications" v-pre title="Notifications">
+                                        <i class="glyphicon glyphicon-bell"></i>
+                                    </a>
+
+                                    <ul class="dropdown-menu">
+                                        <li>
+                                            <div class="web-notifications-header">
+                                                <h1>
+                                                    Notifications
+                                                    <small class="web-notifications-count   hidden " title="Unread Notifications" data-toggle="tooltip"></small>
+                                                </h1>
+                                                <a href="#" class="web-notifications-mark-read  hidden " data-loading-text="Processing…">
+                                                    Mark all as read
+                                                </a>
+                                            </div>
+                                            <ul class="web-notifications-list">
+                                                                                                    <div class="text-center margin-top-40 margin-bottom-40">
+                                                        <i class="glyphicon glyphicon-bullhorn icon-large"></i>
+                                                        <p class="block-help text-large">
+                                                            Notifications will start showing up here soon
+                                                        </p>
+                                                        <a href="https://freescout.example.com/users/notifications/2">Update your notification settings</a>
+                                                    </div>
+                                                                                            </ul>
+                                        </li>
+
+                                    </ul>
+                                </li>
+
+
+                                <li class="dropdown">
+
+                                    <a href="#" class="dropdown-toggle dropdown-toggle-icon dropdown-toggle-account" data-toggle="dropdown" role="button" aria-expanded="false" aria-haspopup="true" v-pre title="Account" aria-label="Account">
+                                        <span class="photo-sm"><i class="person-photo person-photo-auto" data-initial="DA"></i></span>&nbsp;<span class="nav-user">Demo</span> <span class="caret"></span>
+                                    </a>
+
+                                    <ul class="dropdown-menu">
+                                        <li><a href="https://freescout.example.com/users/profile/2">Your Profile</a></li>
+                                                                                <li class="divider"></li>
+                                        <li>
+                                            <a href="#" id="logout-link">
+                                                Log Out
+                                            </a>
+
+                                            <form id="logout-form" action="https://freescout.example.com/logout" method="POST" style="display: none;">
+                                                <input type="hidden" name="_token" value="CSRF_TOKEN_REDACTED">
+                                            </form>
+                                        </li>
+                                        <li class="divider hidden in-app-switcher"></li>
+                                        <li>
+                                            <a href="#" class="hidden in-app-switcher">Switch Helpdesk URL</a>
+                                        </li>
+                                    </ul>
+                                </li>
+
+                                <li class="dropdown">
+                                    <a href="#" class="dropdown-toggle dropdown-toggle-icon" data-toggle="dropdown" role="button" aria-expanded="false" aria-haspopup="true" v-pre title="Search" aria-label="Search" id="search-dt">
+                                        <i class="glyphicon glyphicon-search"></i>
+                                    </a>
+
+                                    <ul class="dropdown-menu dropdown-with-icons">
+                                        <li>
+                                            <form class="form-inline form-nav-search" role="form" action="https://freescout.example.com/search">
+                                                <div class="input-group">
+                                                    <input type="text" class="form-control" name="q">
+                                                    <span class="input-group-btn">
+                                                        <button class="btn btn-default" type="submit">Search</button>
+                                                    </span>
+                                                </div>
+                                            </form>
+                                        </li>
+                                        <li><a href="https://freescout.example.com/search?f%5Bfollowing%5D=yes"><i class="glyphicon glyphicon-chevron-right"></i> Conversations I&#039;m following</a></li>
+                                        <li><a href="https://freescout.example.com/search?f%5Bassigned%5D=2&amp;f%5Bstatus%5D%5B0%5D=1&amp;f%5Bstatus%5D%5B1%5D=2"><i class="glyphicon glyphicon-chevron-right"></i> My open conversations</a></li>
+                                                                            </ul>
+                                </li>
+                                                    </ul>
+                    </div>
+                </div>
+            </nav>
+                                    <div class="content ">
+                <div class="container">
+    <div class="heading">FreeScout Dashboard</div>
+                <div class="dash-cards margin-top">
+                            <div class="dash-card  dash-card-inactive " data-mailbox-id="1">
+                    <div class="dash-card-content">
+                                                <h3 class="text-wrap-break "><a href="https://freescout.example.com/mailbox/1" class="mailbox-name">Support</a></h3>
+                        <div class="dash-card-link text-truncate">
+                            <a href="https://freescout.example.com/mailbox/1" class="text-truncate help-link">support@freescout.example.com</a>
+                        </div>
+                        <div class="dash-card-list">
+                                                                                                                        <a href="https://freescout.example.com/mailbox/1/1" class="dash-card-list-item " title="Waiting Since">Unassigned<span class="waiting-since">/ 10 hours ago</span><strong  class="has-value" >2</strong></a>
+                                                                                            <a href="https://freescout.example.com/mailbox/1/17" class="dash-card-list-item " title="Waiting Since">Mine<span class="waiting-since">/ 4 hours ago</span><strong  class="has-value" >2</strong></a>
+                                                                                            <a href="https://freescout.example.com/mailbox/1/18" class="dash-card-list-item " title="Waiting Since">Starred<strong  class="has-value" >1</strong></a>
+                                                                                            <a href="https://freescout.example.com/mailbox/1/2" class="dash-card-list-item  dash-card-item-empty " title="View conversations">Drafts<strong >0</strong></a>
+                                                                                            <a href="https://freescout.example.com/mailbox/1/3" class="dash-card-list-item " title="Waiting Since">Assigned<span class="waiting-since">/ 14 hours ago</span><strong  class="has-value" >1</strong></a>
+                                                    </div>
+                        <div class="dash-card-inactive-content">
+                            <div class="block-help">
+                                Administrator has not configured mailbox connection settings yet.
+                            </div>
+                                                    </div>
+                    </div>
+                    
+                    <div class="dash-card-footer">
+                        <div class="btn-group btn-group-justified btn-group-rounded">
+                                                            <div class="btn-group dropdown dropup" data-toggle="tooltip" title="Mailbox Settings">
+                                    <a data-toggle="dropdown" href="#" class="btn btn-trans"><i class="glyphicon glyphicon-cog dropdown-toggle"></i></a>
+                                    <ul class="dropdown-menu" role="menu">
+                                        <li class="divider"></li>
+    <li><a href="https://freescout.example.com/conversation/ajax-html/default_redirect?mailbox_id=1" data-trigger="modal" data-modal-title="Default Redirect" data-modal-no-footer="true" data-modal-on-show="initAfterSendModal" role="button"><i class="glyphicon glyphicon-share-alt"></i> Default Redirect…</span></a></li>
+	<li class="divider"></li>
+	<li><a href="#" class="mailbox-mute-trigger"  data-mute="1"  data-mailbox-id="1" data-loading-text="Processing…"><i class="glyphicon glyphicon-volume-off"></i> <span class="mute-text-1 ">Mute Notifications</span><span class="mute-text-0  hidden ">Unmute Notifications</span></a></li>
+                                    </ul>
+                                </div>
+                                                                                    <a href="https://freescout.example.com/mailbox/1" class="btn btn-trans" data-toggle="tooltip" title="Open Mailbox"><i class="glyphicon glyphicon-arrow-right"></i></a>
+                        </div>
+                    </div>
+                </div>
+                    </div>
+        </div>
+            </div>
+        
+                    <div class="footer">
+                                    &copy; 2018-2026 <a href="https://freescout.net" target="blank">FreeScout</a> — Free open source help desk &amp; shared mailbox
+                                                
+                            </div>
+            </div>
+
+    <div id="loader-main"></div>
+
+    
+        
+    
+        <script src="https://freescout.example.com/js/builds/cf7c8164a6f5386a977279bc27ee85d926889267514.js"></script>
+
+            <script type="text/javascript"  nonce="NONCE_REDACTED">
+                            </script>
+</body>
+</html>

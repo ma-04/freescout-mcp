@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+demo/.env
+*.log
+.DS_Store
+
+# Local session notes for humans/Claude; never committed (infra details)
+SESSION_MEMORY.md
+
+# Browser captures (HAR etc.) for endpoint discovery; may contain session cookies
+captures/
+
+# Playwright MCP output (snapshots of production pages)
+.playwright-mcp/

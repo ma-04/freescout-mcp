@@ -1,0 +1,12 @@
+node_modules
+dist
+.git
+.github
+.env
+.env.*
+deploy/.env
+demo
+docs
+test
+*.log
+.DS_Store

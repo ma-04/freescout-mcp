@@ -1,0 +1,60 @@
+{
+ "status": "success",
+ "msg": "",
+ "report": "<div class=\"rpt-metrics\">\n\n    <div class=\"rpt-metric\">\n    \t<div class=\"rpt-metric-title\">\n    \t\tCustomers Helped&nbsp;<i class=\"glyphicon glyphicon-question-sign\" data-toggle=\"tooltip\" title=\"Number of customers who received replies from support agents.\"></i>\n    \t</div>\n\t\t<div class=\"rpt-metric-value\">\n    \t\t20\n    \t\t<span class=\" rpt-metric-change  text-danger\">\n\t\t-65%\n\t</span>\n    \t</div>\n    </div>\n\n\t<div class=\"rpt-metric\">\n    \t<div class=\"rpt-metric-title\">\n    \t\tReplies Sent&nbsp;<i class=\"glyphicon glyphicon-question-sign\" data-toggle=\"tooltip\" title=\"Number of replies sent from users to customers including new conversations.\"></i>\n    \t</div>\n\t\t<div class=\"rpt-metric-value\">\n    \t\t34\n    \t\t<span class=\" rpt-metric-change  text-danger\">\n\t\t-144%\n\t</span>\n    \t</div>\n    </div>\n\n\t<div class=\"rpt-metric\">\n    \t<div class=\"rpt-metric-title\">\n    \t\tReplies per Day&nbsp;<i class=\"glyphicon glyphicon-question-sign\" data-toggle=\"tooltip\" title=\"Average number of replies sent by users per day.\"></i>\n    \t</div>\n\t\t<div class=\"rpt-metric-value\">\n    \t\t6\n    \t\t<span class=\" rpt-metric-change  text-danger\">\n\t\t-67%\n\t</span>\n    \t</div>\n    </div>\n    \n\t<div class=\"rpt-metric\">\n    \t<div class=\"rpt-metric-title\">\n    \t\tClosed&nbsp;<i class=\"glyphicon glyphicon-question-sign\" data-toggle=\"tooltip\" title=\"Number of closed conversations.\"></i>\n    \t</div>\n\t\t<div class=\"rpt-metric-value\">\n    \t\t36\n    \t\t<span class=\" rpt-metric-change  text-danger\">\n\t\t-83%\n\t</span>\n    \t</div>\n    </div>\n\n\t<div class=\"rpt-metric\">\n    \t<div class=\"rpt-metric-title\">\n    \t\tResolved On First Reply&nbsp;<i class=\"glyphicon glyphicon-question-sign\" data-toggle=\"tooltip\" title=\"Number of closed conversations resolved on first reply.\"></i>\n    \t</div>\n\t\t<div class=\"rpt-metric-value\">\n    \t\t2\n    \t\t<span class=\" rpt-metric-change  text-danger\">\n\t\t-150%\n\t</span>\n    \t</div>\n    </div>\n\n</div>\n\n\n<div id=\"rpt-chart-container\">\n\t<div id=\"rpt-options\">\n\t\t<div class=\"row\">\n\t\t\t<div class=\"col-md-6\">\n\t    \t\t<select class=\"form-control rpt-option\" id=\"rpt-chart-type\">\n\t    \t\t\t<option value=\"customers_helped\"  selected >Customers Helped</option>\n\t    \t\t\t<option value=\"replies\" >Replies Sent</option>\n\t    \t\t\t<option value=\"closed\" >Closed</option>\n\t    \t\t</select>\n\t    \t</div>\n\t    \t<div class=\"col-md-6\">\n\t\t\t\t<div class=\"btn-group btn-group-justified rpt-option\" id=\"rpt-group-by\">\n\t\t\t\t\t\t\t\t\t\t\t<div class=\"btn-group\" role=\"group\">\n\t\t\t\t\t\t\t<button type=\"button\" value=\"d\" class=\"btn btn-default  active \">Day</button>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t</div>\n\t\t\t</div>\n\t\t</div>\n\t</div>\n\t<div>\n\t\t<canvas id=\"rpt-chart\"></canvas>\n\t</div>\n</div>\n\n<div id=\"rpt-tables\">\n\t<div class=\"row\">\n\t\t<div class=\"col-md-6\">\n\t\t\t<table class=\"table table-striped\">\n\t\t\t\t<tr>\n\t\t\t\t\t<th>First Response Time</th>\n\t\t\t\t\t<th>%</th>\n\t\t\t\t\t<th>\u0394</th>\n\t\t\t\t</tr>\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t<tr>\n\t\t\t\t\t\t<td>30-60 min</td>\n\t\t\t\t\t\t<td>33%</td>\n\t\t\t\t\t\t<td><span class=\" text-success\">\n\t\t+24%\n\t</span>\n</td>\n\t\t\t\t\t</tr>\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t<tr>\n\t\t\t\t\t\t<td>1-2 hours</td>\n\t\t\t\t\t\t<td>8%</td>\n\t\t\t\t\t\t<td><span class=\" text-danger\">\n\t\t-25%\n\t</span>\n</td>\n\t\t\t\t\t</tr>\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t<tr>\n\t\t\t\t\t\t<td>2-3 hours</td>\n\t\t\t\t\t\t<td>8%</td>\n\t\t\t\t\t\t<td><span class=\" text-success\">\n\t\t+38%\n\t</span>\n</td>\n\t\t\t\t\t</tr>\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t<tr>\n\t\t\t\t\t\t<td>3-6 hours</td>\n\t\t\t\t\t\t<td>8%</td>\n\t\t\t\t\t\t<td><span class=\" text-danger\">\n\t\t-25%\n\t</span>\n</td>\n\t\t\t\t\t</tr>\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t<tr>\n\t\t\t\t\t\t<td>6-12 hours</td>\n\t\t\t\t\t\t<td>8%</td>\n\t\t\t\t\t\t<td><span class=\" text-danger\">\n\t\t-88%\n\t</span>\n</td>\n\t\t\t\t\t</tr>\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t<tr>\n\t\t\t\t\t\t<td>12-24 hours</td>\n\t\t\t\t\t\t<td>17%</td>\n\t\t\t\t\t\t<td><span class=\" text-success\">\n\t\t+12%\n\t</span>\n</td>\n\t\t\t\t\t</tr>\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t<tr>\n\t\t\t\t\t\t<td>1-2 days</td>\n\t\t\t\t\t\t<td>8%</td>\n\t\t\t\t\t\t<td><span class=\" text-success\">\n\t\t+38%\n\t</span>\n</td>\n\t\t\t\t\t</tr>\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t<tr>\n\t\t\t\t\t\t<td>&gt; 2 days</td>\n\t\t\t\t\t\t<td>8%</td>\n\t\t\t\t\t\t<td><span class=\" text-danger\">\n\t\t-25%\n\t</span>\n</td>\n\t\t\t\t\t</tr>\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t<tr>\n\t\t\t\t\t\t<td><i>Avg.</i></td>\n\t\t\t\t\t\t<td colspan=\"2\"><i>3 h 27 min</i></td>\n\t\t\t\t\t</tr>\n\t\t\t</table>\n\t\t</div>\n\t\t<div class=\"col-md-6\">\n\t\t\t<table class=\"table table-striped\">\n\t\t\t\t<tr>\n\t\t\t\t\t<th>Response Time</th>\n\t\t\t\t\t<th>%</th>\n\t\t\t\t\t<th>\u0394</th>\n\t\t\t\t</tr>\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t<tr>\n\t\t\t\t\t\t<td>15-30 min</td>\n\t\t\t\t\t\t<td>8%</td>\n\t\t\t\t\t\t<td><span class=\" text-danger\">\n\t\t-63%\n\t</span>\n</td>\n\t\t\t\t\t</tr>\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t<tr>\n\t\t\t\t\t\t<td>30-60 min</td>\n\t\t\t\t\t\t<td>25%</td>\n\t\t\t\t\t\t<td><span class=\" text-help\">\n\t\t0%\n\t</span>\n</td>\n\t\t\t\t\t</tr>\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t<tr>\n\t\t\t\t\t\t<td>1-2 hours</td>\n\t\t\t\t\t\t<td>8%</td>\n\t\t\t\t\t\t<td><span class=\" text-danger\">\n\t\t-63%\n\t</span>\n</td>\n\t\t\t\t\t</tr>\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t<tr>\n\t\t\t\t\t\t<td>3-6 hours</td>\n\t\t\t\t\t\t<td>17%</td>\n\t\t\t\t\t\t<td><span class=\" text-success\">\n\t\t+65%\n\t</span>\n</td>\n\t\t\t\t\t</tr>\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t<tr>\n\t\t\t\t\t\t<td>6-12 hours</td>\n\t\t\t\t\t\t<td>8%</td>\n\t\t\t\t\t\t<td><span class=\" text-danger\">\n\t\t-138%\n\t</span>\n</td>\n\t\t\t\t\t</tr>\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t<tr>\n\t\t\t\t\t\t<td>12-24 hours</td>\n\t\t\t\t\t\t<td>25%</td>\n\t\t\t\t\t\t<td><span class=\" text-success\">\n\t\t+24%\n\t</span>\n</td>\n\t\t\t\t\t</tr>\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t<tr>\n\t\t\t\t\t\t<td>&gt; 2 days</td>\n\t\t\t\t\t\t<td>8%</td>\n\t\t\t\t\t\t<td><span class=\" text-success\">\n\t\t+25%\n\t</span>\n</td>\n\t\t\t\t\t</tr>\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t<tr>\n\t\t\t\t\t\t<td><i>Avg.</i></td>\n\t\t\t\t\t\t<td colspan=\"2\"><i>4 h 31 min</i></td>\n\t\t\t\t\t</tr>\n\t\t\t</table>\n\t\t</div>\n\t</div>\n\n\t\n\t<div class=\"row\">\n\t\t\t\t\t<div class=\"col-md-12\">\n\t\t\t\t<table class=\"table table-striped\">\n\t\t\t\t\t<tr>\n\t\t\t\t\t\t<th>User</th>\n\t\t\t\t\t\t<th>Replies Sent</th>\n\t\t\t\t\t\t<th>Closed</th>\n\t\t\t\t\t\t<th>Customers Helped</th>\n\t\t\t\t\t\t<th>Satisfaction Score</th>\t\t\t\t\t</tr>\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t<tr>\n\t\t\t\t\t\t\t\t<td><button type=\"button\" data-uid=\"50\" class=\"btn btn-link btn-sm rpt-user-btn\">User 50</button></td>\n\t\t\t\t\t\t\t\t<td>34</td>\n\t\t\t\t\t\t\t\t<td>36</td>\n\t\t\t\t\t\t\t\t<td>20</td>\n\t\t\t\t\t\t\t\t<td>0</td>\t\t\t\t\t\t\t</tr>\n\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t</table>\n\t\t\t</div>\n\t\t\t</div>\n</div>\n",
+ "chart": {
+  "type": "customers_helped",
+  "group_bys": [
+   "d"
+  ],
+  "group_by": "d",
+  "labels": [
+   "Oct 21",
+   "Oct 22",
+   "Oct 23",
+   "Oct 24",
+   "Oct 25",
+   "Oct 26",
+   "Oct 27",
+   "Oct 28",
+   "Oct 29",
+   "Oct 30"
+  ],
+  "datasets": [
+   {
+    "label": "Current",
+    "borderColor": "#7cb5ec",
+    "backgroundColor": "rgba(124,181,236,0.3)",
+    "fill": true,
+    "data": [
+     7,
+     5,
+     0,
+     0,
+     1,
+     7,
+     1,
+     9,
+     0,
+     0
+    ]
+   },
+   {
+    "label": "Previous",
+    "borderColor": "rgb(137,150,163)",
+    "data": [
+     12,
+     6,
+     7,
+     8,
+     0,
+     0,
+     5,
+     8,
+     3,
+     7
+    ]
+   }
+  ]
+ }
+}
