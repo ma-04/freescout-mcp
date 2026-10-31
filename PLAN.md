@@ -33,6 +33,59 @@ the account can open it, with a search-derived fallback everywhere; all four ite
 per agent, satisfaction by date per agent, ticket volume by date, richer search filters); Reports-module endpoints
 are discovered from a browser capture the user makes on their own install (Claude never logs in to production).
 
+Scope update (2026-10-31, user): **statistics correctness, daily/weekly agent stats, search parity, more reports,
+richer data**, all read-only; builds deployed to the hosted MCP from the branch for read-only verification against
+production through Chrome (user logged in, Playwright MCP). Decisions from the planning questions: all four items;
+hosted redeploy from the branch; writes exercised on the demo only; branch + PR. Priority (user): daily and weekly
+stats, verified first.
+
+Evidence gathered 2026-10-31 (production, user 50, read-only, raw captures in git-ignored `captures/`, scrubbed
+fixtures go to `docs/fixtures/`):
+- `productivity_report`, `satisfaction_report` for 2026-10-24..31 matched the Reports pages exactly (every card, bucket,
+  user row). `ticket_volume` total 122 = Conversations report "New Conversations" 122 for the same range.
+- Day chart series is sound (Oct 1..31 `replies` day points sum to 437 = Replies Sent). FreeScout's **week** series is
+  not (sums to 44; labels `Oct 3, 10, 17, 24, 31` = Saturdays, i.e. Sun–Sat weeks labelled by end date). Weekly numbers
+  must never come from the week chart.
+- Reports module has four tabs: `conversations`, `productivity`, `satisfaction`, `time-tracking`. Wire names in
+  `report_name`: `conversations` and **`time`** (page slug `time-tracking`, `#rpt-report[data-report-name="time"]`).
+  Both filter forms have `type, mailbox, tag, period, from, to` (no `user`). Request body observed:
+  `action=report&report_name=<name>&filters[type]=&filters[mailbox]=&filters[tag]=&filters[period]=custom&filters[from]=…&filters[to]=…`.
+- Search page filters the UI exposes that the tool lacks: `f[mailbox]` (select), `f[tag]` (text, tag name),
+  `f[following]=yes`, `f[number]`, `f[id]`, `f[attachment name]`, `f[customer]` (ajax select) and CRM
+  `f[#Subscription]` (select, 8 values) / `f[#Expiry Date]`. `mode=customers` exists.
+- Bug: `span.conv-tags` sits inside the subject `<p>` of every conversation table row (Tags module); the parser's
+  `.text()` glues tag names onto `subject` (seen in `get_customer`, `search_conversations`, `list_conversations`).
+- CRM custom fields (`crmInitVars`: Subscription cf_1, Expiry Date cf_2) exist on production but no customer visible to
+  this account has a value (both `#Subscription` searches returned no rows), so there is no markup to parse: deferred.
+
+### Phase C — this round (2026-10-31)
+1. **`agent_stats`** (new, read-only): per-period productivity numbers. `from`, `to`, `period` `day|week|month`,
+   optional `mailbox_id`, `user_id`, `type`, `tag_id`, `week_start` `monday` (default, ISO) | `sunday` (FreeScout's).
+   One guarded productivity report request per bucket (same `REPORTS_AJAX` call site and `assertReportForm`), serial,
+   paced by `FREESCOUT_STATS_DELAY_MS`, ≤ 31 buckets, each bucket returns explicit `start`/`end` dates, the metric cards
+   and the per-user table; buckets are clipped to `from..to`. Totals row summed client-side. No chart. Module missing →
+   same `available:false` shape as the report tools.
+2. **`productivity_report` chart**: when `group_by` is `week`/`month`, request the **day** series and bucket it
+   client-side into `periods` (`start`, `end`, `value`), keeping FreeScout's raw series under `chart.raw` with a warning;
+   `previous` series bucketed the same way. Labels remain opaque; dates come from `from` + index.
+3. **`conversations_report`** and **`time_tracking_report`** (new, read-only): `POST /reports/ajax` with
+   `report_name=conversations` / `time`, filters `type, mailbox_id, tag_id` (no `user_id`), per-report key whitelist in
+   `assertReportForm`. Availability check must map slug `time-tracking` ↔ wire `time`. Parser dispatch becomes
+   report-aware (time-tracking's CONVERSATION table is not a ratings table). Customer names, conversation subjects
+   are untrusted and returned only with `include_names: true` (same model as `include_comments`).
+4. **Search parity**: `search_conversations` gains `tag` (name), `following`, `number`, `id`, `attachment_name`;
+   `mailbox_id` keeps its current semantics. CRM fields are not added (no data to verify against).
+5. **Tags in table rows**: `conversation-table.ts` strips `.conv-tags` from `subject` and emits `tags: string[]`;
+   fixture scrubbed from the 2026-10-31 search capture. Affects `list_conversations`, `search_conversations`,
+   `get_customer.conversations`.
+6. **Roadmap 1.3/1.5**: `waiting_conversations` (aging, composition over folders, capped pages) and `customer_history`
+   (composition over `get_customer`) only if time allows after 1–5; CRM fields (1.2) deferred for lack of data.
+7. No new POST path; red-team scan still sees one `/reports/ajax` literal and one call site.
+
+Verification (after hosted redeploy, read-only): for two single days and two whole weeks set the exact range on the
+Chrome Reports page and compare cards + users table with the matching `agent_stats` bucket; compare Aug 31–Sep 30 day
+series with October's `previous` series to settle the "previous period" note; conversations/time-tracking cards vs page.
+
 ### Phase A — buildable now (verified on the demo, docs/freescout-endpoints.md §10)
 1. `search_conversations` gains filters: `assigned` (user id or `"unassigned"`), `status[]`, `state[]`, `after`,
    `before` (strict `YYYY-MM-DD`; FreeScout turns anything else into 1970-01-01 silently), `customer_id`, `type`,
