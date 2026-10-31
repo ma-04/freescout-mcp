@@ -122,6 +122,7 @@ function demoCustomer($email, $first, $last, $company = null)
  */
 function demoConversation(Mailbox $mailbox, Customer $customer, $subject, $status, $assignee, array $threads, $closedBy = null)
 {
+    global $domain;
     $email = $customer->getMainEmail();
 
     $firstAt = date('Y-m-d H:i:s', time() - $threads[0][2] * 60);

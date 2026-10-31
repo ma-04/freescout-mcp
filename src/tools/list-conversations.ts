@@ -14,7 +14,8 @@ export function registerListConversations(server: McpServer, { client }: ToolCon
         "List conversations in one folder of a mailbox, 50 per page (FreeScout's page size). folder is a folder " +
         "name (unassigned, mine, starred, assigned, closed, drafts, spam, deleted) resolved from the mailbox's " +
         "sidebar, or a numeric folder id from list_mailboxes. Rows: id (use with get_conversation), number, " +
-        "subject, customer, preview, inferred status, assignee (when shown), last activity, thread count, starred. " +
+        "subject, customer, preview, inferred status, assignee (when shown), last activity, thread count, starred, " +
+        "tags (tag names from the Tags module, [] without it; never part of subject). " +
         "Use has_next_page/page to paginate. " + PERMISSION_NOTE,
       inputSchema: {
         mailbox_id: z.number().int().positive().describe("Mailbox id from list_mailboxes."),

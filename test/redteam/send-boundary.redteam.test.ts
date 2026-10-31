@@ -265,6 +265,14 @@ describe("RT: the one Reports POST (/reports/ajax) only ever computes a report",
     expect(src.match(/"\/reports\/ajax"/g)).toHaveLength(1);
     expect(src.match(/\bREPORTS_AJAX\b/g)).toHaveLength(2); // definition + the single ajaxPost call in fetchReport
     expect(src.match(/ajaxPost<[^>]*>\(REPORTS_AJAX,/g)).toHaveLength(1);
+    // Total `port.ajaxPost<...>(` call sites in src/ (2026-10-31), pinned so a new POST anywhere fails here:
+    //   src/operations.ts: list_tags autocomplete, add_tag, remove_tag (TAGS_AJAX); add_note, save_draft,
+    //     discard_draft, close_conversation, forward (send_reply) (AJAX)
+    //   src/reports.ts: fetchReport (REPORTS_AJAX)
+    // Not counted: the Session/FreeScoutClient/FreeScoutPort definitions, the client's passthrough
+    // (this.session.ajaxPost) and ticket_volume's refusing stub (`ajaxPost: () => Promise.reject`).
+    expect(src.match(/\bport\.ajaxPost\s*(?:<[^()]*>)?\(/g)).toHaveLength(9);
+    expect(src.match(/\.ajaxPost\s*(?:<[^()]*>)?\(/g)).toHaveLength(10); // + the client passthrough
     expect(src.match(/action: "report",/g)).toHaveLength(1); // buildReportForm only
     expect(src.match(/action: "send_reply",/g)).toHaveLength(2);
     expect(src.match(/action: "conversation_change_status",/g)).toHaveLength(1);
@@ -311,12 +319,29 @@ describe("RT: the one Reports POST (/reports/ajax) only ever computes a report",
       expect(() => assertReportForm({ ...ok, ...extra }), JSON.stringify(extra)).toThrow(FreeScoutError);
     }
     expect(() => assertReportForm({ ...ok, filters: { ...ok.filters, export: "csv" } })).toThrow(FreeScoutError);
-    for (const report_name of ["conversations", "time-tracking", "export", "", "Productivity"]) {
+    // 2026-10-31: conversations and time (wire name of /reports/time-tracking) were whitelisted; the page slug
+    // `time-tracking` is not a wire name and stays refused, like any other name.
+    for (const report_name of ["time-tracking", "time_tracking", "export", "", "Productivity", "Conversations", "times"]) {
       expect(() => assertReportForm({ ...ok, report_name }), report_name).toThrow(FreeScoutError);
     }
     const sat = buildReportForm("satisfaction", { from: "2026-10-01", to: "2026-10-28" });
     expect(sat).not.toHaveProperty("chart");
     expect(() => assertReportForm({ ...sat, chart: { group_by: "d", type: "replies" } })).toThrow(/only allowed for productivity/);
+    // Per-report key whitelist: conversations and time take no user filter and no chart keys.
+    for (const name of ["conversations", "time"] as const) {
+      const f = buildReportForm(name, { from: "2026-10-24", to: "2026-10-31", mailbox_id: 15, tag_id: 3, type: "email" });
+      expect(() => assertReportForm(f)).not.toThrow();
+      expect(Object.keys(f.filters).sort()).toEqual(["from", "mailbox", "period", "tag", "to", "type"]);
+      expect(() => assertReportForm({ ...f, filters: { ...f.filters, user: "50" } }), name).toThrow(/unexpected filters field user/);
+      expect(() => assertReportForm({ ...f, chart: { group_by: "d", type: "replies" } }), name).toThrow(/only allowed for productivity/);
+      expect(() => assertReportForm({ ...f, chart: { group_by: "d", type: "new_conv" } }), name).toThrow(FreeScoutError);
+      expect(() => buildReportForm(name, { from: "2026-10-24", to: "2026-10-31", user_id: 50 })).toThrow(/no user filter|not a filter/);
+      expect(() => buildReportForm(name, { from: "2026-10-24", to: "2026-10-31", chart_metric: "replies" })).toThrow(/productivity-only/);
+    }
+    // Week/month series are never requested any more: chart.group_by is pinned to d.
+    for (const group_by of ["w", "m", "y", ""]) {
+      expect(() => assertReportForm({ ...ok, chart: { group_by, type: "replies" } }), group_by).toThrow(FreeScoutError);
+    }
   });
 
   it("through the MCP tools, every POST is /reports/ajax with action=report and only the pinned keys", async () => {
@@ -337,11 +362,19 @@ describe("RT: the one Reports POST (/reports/ajax) only ever computes a report",
         expect((await mcp.callTool({ name: "list_report_users", arguments: {} })).isError).toBeFalsy();
         // Unknown arguments are stripped by zod, never forwarded.
         expect((await mcp.callTool({ name: "satisfaction_report", arguments: { ...args, action: "export", chart_metric: "replies" } })).isError).toBeFalsy();
+        // 2026-10-31: agent_stats (one report per bucket: 2 weeks here), conversations and time tracking. user_id is
+        // not in the last two schemas and is stripped by zod, never forwarded.
+        expect((await mcp.callTool({ name: "agent_stats", arguments: { ...args, from: "2026-10-19", to: "2026-10-28", period: "week" } })).isError).toBeFalsy();
+        expect((await mcp.callTool({ name: "conversations_report", arguments: { ...args, include_names: true, chart_metric: "replies" } })).isError).toBeFalsy();
+        expect((await mcp.callTool({ name: "time_tracking_report", arguments: { ...args, group_by: "week" } })).isError).toBeFalsy();
       } finally {
         await Promise.all([mcp.close(), server.close()]);
       }
       const posts = fs.requests.filter((r) => r.method === "POST").map((r) => r.path);
-      expect(posts).toEqual(["/reports/ajax", "/reports/ajax", "/reports/ajax"]);
+      expect(posts).toEqual(Array(7).fill("/reports/ajax"));
+      expect(fs.reportPosts.map((f) => f.find(([k]) => k === "report_name")![1])).toEqual([
+        "productivity", "satisfaction", "satisfaction", "productivity", "productivity", "conversations", "time",
+      ]);
       const allowed = new Set(["action", "report_name", "filters[type]", "filters[mailbox]", "filters[user]", "filters[tag]", "filters[period]", "filters[from]", "filters[to]", "chart[group_by]", "chart[type]", "_token"]);
       for (const f of fs.reportPosts) {
         const keys = f.map(([k]) => k);
@@ -350,7 +383,9 @@ describe("RT: the one Reports POST (/reports/ajax) only ever computes a report",
         expect(f.filter(([k]) => k === "action")).toEqual([["action", "report"]]);
         expect(f).toContainEqual(["filters[period]", "custom"]);
         const name = f.find(([k]) => k === "report_name")![1];
-        if (name === "satisfaction") expect(keys.some((k) => k.startsWith("chart["))).toBe(false);
+        if (name !== "productivity") expect(keys.some((k) => k.startsWith("chart["))).toBe(false);
+        if (name === "conversations" || name === "time") expect(keys).not.toContain("filters[user]");
+        if (keys.includes("chart[group_by]")) expect(f).toContainEqual(["chart[group_by]", "d"]);
       }
       expect(fs.convPosts).toEqual([]);
       expect(fs.tagPosts).toEqual([]);

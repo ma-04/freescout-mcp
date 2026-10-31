@@ -97,6 +97,8 @@ export class FakeFreeScout {
   searchConvs: FakeSearchConv[] = DEMO_SEARCH_CONVS.map((c) => ({ ...c }));
   searchAssignees: Array<[number, string]> = [[2, "Demo Agent"]];
   searchMailboxes: Array<[number, string]> = [[1, "Support"]];
+  /** data-filter names the search page offers (FreeScout core plus module filters such as the Tags module's "tag"). */
+  searchFilterNames: string[] = [...CORE_SEARCH_FILTERS, "tag", "attachment name"];
   /** Query strings of every GET /search, in arrival order. */
   searchRequests: URLSearchParams[] = [];
   /**
@@ -370,7 +372,7 @@ export class FakeFreeScout {
           }
           const p = new URLSearchParams(url.searchParams);
           if (this.searchForceAssigned !== undefined) p.set("f[assigned]", String(this.searchForceAssigned));
-          return send(200, searchPage(this.base, sess.token, p, this.searchConvs, this.searchAssignees, this.searchMailboxes));
+          return send(200, searchPage(this.base, sess.token, p, this.searchConvs, this.searchAssignees, this.searchMailboxes, this.searchFilterNames));
         }
       case "GET /tags/ajax":
       case "POST /tags/ajax":
@@ -378,7 +380,9 @@ export class FakeFreeScout {
         if (!this.tags) return send(404, "not found");
         return json(...this.tagsAjax(req.method === "POST" ? form : url.searchParams));
       case "GET /reports/productivity":
-      case "GET /reports/satisfaction": {
+      case "GET /reports/satisfaction":
+      case "GET /reports/conversations":
+      case "GET /reports/time-tracking": {
         if (!this.reports || this.reports.mode === "absent") return send(404, "not found");
         if (!sess.authed) return redirect("/login");
         const name = url.pathname.slice("/reports/".length);
@@ -599,6 +603,12 @@ export interface FakeSearchConv {
   subject: string;
   /** 1 draft, 2 published (default), 3 deleted. */
   state?: number;
+  /** Tags module names; rendered as span.conv-tags inside the subject paragraph, like production (2026-10-31). */
+  tags?: string[];
+  /** Followed by the current user (f[following]=yes). */
+  following?: boolean;
+  /** Attachment file names (f[attachment name] substring match; the module's exact semantics are unverified). */
+  attachment_names?: string[];
 }
 
 /** Demo `conversations` (mailbox 1), docs/freescout-endpoints.md §10.4. Subjects are synthetic. */
@@ -621,6 +631,11 @@ export const DEMO_SEARCH_CONVS: FakeSearchConv[] = [
   subject: `Fake subject ${id}`,
 }));
 
+/** `Conversation::$search_filters` in FreeScout 1.8.248 (demo container source), i.e. the core filter menu. */
+export const CORE_SEARCH_FILTERS = [
+  "assigned", "customer", "mailbox", "status", "state", "subject", "attachments", "type", "body", "number", "following", "id", "after", "before",
+];
+
 /** FreeScout's date filter: strtotime + date('Y-m-d'); anything unparsable silently becomes 1970-01-01. */
 function fsDate(v: string): string {
   return /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v)) ? v : "1970-01-01";
@@ -634,6 +649,7 @@ export function searchPage(
   convs: FakeSearchConv[],
   assignees: Array<[number, string]>,
   mailboxes: Array<[number, string]>,
+  filterNames: string[] = [...CORE_SEARCH_FILTERS, "tag", "attachment name"],
 ): string {
   const viewable = new Set(mailboxes.map(([id]) => id));
   let rows = convs.filter((c) => viewable.has(c.mailbox_id));
@@ -653,13 +669,21 @@ export function searchPage(
   if (states.length) rows = rows.filter((c) => states.includes(c.state ?? 2));
   const num = p.get("f[number]");
   if (num) rows = rows.filter((c) => c.id === Number(num)); // demo: number == id
+  const id = p.get("f[id]");
+  if (id) rows = rows.filter((c) => c.id === Number(id));
+  if (p.get("f[following]") === "yes") rows = rows.filter((c) => c.following === true);
+  const tag = p.get("f[tag]");
+  if (tag) rows = rows.filter((c) => (c.tags ?? []).includes(tag));
+  const att = p.get("f[attachment name]");
+  if (att) rows = rows.filter((c) => (c.attachment_names ?? []).some((n) => n.toLowerCase().includes(att.toLowerCase())));
   rows.sort((a, b) => b.id - a.id);
   const pageNo = Math.max(1, Number(p.get("page") ?? 1) || 1);
   const pageRows = rows.slice((pageNo - 1) * 50, pageNo * 50);
   const opts = (list: Array<[number, string]>, sel: string | null) =>
     list.map(([id, n]) => `<option value="${id}"${String(id) === sel ? " selected" : ""}>${esc(n)}</option>`).join("");
+  const menu = `<ul class="sidebar-menu">${filterNames.map((n) => `<li><a href="#" data-filter="${esc(n)}">${esc(n)}:</a></li>`).join("")}</ul>`;
   const form =
-    `<form class="search-filters"><select name="f[assigned]" class="form-control" ${assigned ? "" : "disabled"}><option value=""></option>` +
+    menu + `<form class="search-filters"><select name="f[assigned]" class="form-control" ${assigned ? "" : "disabled"}><option value=""></option>` +
     `<option value="-1"${assigned === "-1" ? ' selected="selected"' : ""}>Unassigned</option>${opts(assignees, assigned)}</select>` +
     `<select name="f[mailbox]" class="form-control" disabled><option value=""></option>${opts(mailboxes, p.get("f[mailbox]"))}</select></form>`;
   const body = pageRows.length
@@ -667,7 +691,7 @@ export function searchPage(
         .map(
           (c) =>
             `<tr class="conv-row${c.status === 1 ? " conv-active" : ""}" data-conversation_id="${c.id}"><td class="conv-subject">` +
-            `<a href="${base}/conversation/${c.id}"><p>${esc(c.subject)}</p></a></td></tr>`,
+            `<a href="${base}/conversation/${c.id}"><p>${c.tags?.length ? `<span class="conv-tags">${c.tags.map((t) => `<span class="tag tag-c-0" data-tag-url="${base}/search?f%5Btag%5D=${encodeURIComponent(t)}">${esc(t)}</span>`).join(" ")}</span>&nbsp;` : ""}${esc(c.subject)}</p></a></td></tr>`,
         )
         .join("")}</tbody><tfoot><tr><td class="conv-totals" colspan="6"><strong>${rows.length}</strong> conversations&nbsp;|&nbsp; ` +
       `<strong>${(pageNo - 1) * 50 + 1}</strong>-<strong>${(pageNo - 1) * 50 + pageRows.length}</strong></td></tr></tfoot></table>`
@@ -686,6 +710,16 @@ export function reportPage(name: string, token: string): string {
   if (name === "satisfaction") {
     html = html.replace('data-report-name="productivity"', 'data-report-name="satisfaction" data-chart-type="pie"').replaceAll("Productivity Report", "Satisfaction Report");
   }
+  // 2026-10-31 captures: the conversations and time tracking forms are the productivity form without the user select;
+  // the time tracking page (slug time-tracking) renders data-report-name="time".
+  if (name === "conversations" || name === "time-tracking") {
+    const [wire, title, attrs] =
+      name === "conversations" ? ["conversations", "Conversations Report", ""] : ["time", "Time Tracking Report", ' data-chart-type="column"'];
+    html = html
+      .replace(/<div class="rpt-filter">\s*User [\s\S]*?<\/select><\/span>[\s\S]*?<\/div>/, "")
+      .replace('data-report-name="productivity"', `data-report-name="${wire}"${attrs}`)
+      .replaceAll("Productivity Report", title);
+  }
   return html;
 }
 
@@ -698,6 +732,8 @@ export function reportAjaxFixture(form: URLSearchParams): string {
   if (form.get("action") !== "report") return JSON.stringify({ status: "error", msg: "Unknown action" });
   const name = form.get("report_name");
   if (name === "satisfaction") return fixture("reports-satisfaction-ajax.json");
+  if (name === "conversations") return fixture("reports-conversations-ajax.json");
+  if (name === "time") return fixture("reports-time-tracking-ajax.json");
   if (name !== "productivity") return JSON.stringify({ status: "error", msg: "Unknown report" });
   if (form.get("chart[group_by]") === "m") return fixture("reports-productivity-ajax-by-month.json");
   if (form.has("filters[user]")) return fixture("reports-productivity-ajax-user.json");

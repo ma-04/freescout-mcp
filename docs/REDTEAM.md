@@ -345,10 +345,45 @@ three path constants (`AJAX` = `/conversation/ajax` ×5, `TAGS_AJAX` = `tags/aja
 | L6 | Low | Final-path check used `endsWith` | Exact `<FREESCOUT_URL path>/reports/<name>` (port exposes `baseUrl`); tests for a satisfaction page redirected to `/reports/productivity`, a sub-path install redirected to the root, and a prefixed path | Fixed |
 | L7 | Low | Five §11 doc statements disagreed with the code | Non-JSON ajax = tool error; previous period inferred; no pacing pause; raw captures deleted after scrubbing; the page's own `from` default explained (the MCP always sends both dates) | Fixed |
 | L8 | Low | Untested branches; unused fake option | Tests: 500-rating cap (501 generated rows through the fake's `reports.answer`), no chart, label/series length mismatch, `filter_warnings` for user and tag, empty report, redirected satisfaction page | Fixed |
-| I1 | Info | Chart keys sent on the default request, unlike the module's first request | No chart keys for the default (customers_helped by day): byte-identical to §11.2 bodies 1 and 4; both shapes asserted | Fixed |
+| I1 | Info | Chart keys sent on the default request, unlike the module's first request | No chart keys for the default (customers_helped by day): byte-identical to §11.2 bodies 1 and 4; both shapes asserted | Fixed (superseded 2026-10-31: chart keys are now always sent, see the review fixes below) |
 | I2 | Info | "ONE POST" could be two (CSRF/session retry) | Wording: one report request per call; the session layer may retry it once after a CSRF refresh or re-login | Fixed |
 | I3 | Info | A 403 on the report POST spoke of mailboxes/conversations | Reworded as a Reports module / report permission tool error (still not zeros) | Fixed |
 | I4 | Info | Red-team scan did not whitelist every POST path | All `ajaxPost` call sites counted and checked against the three constants (see above) | Fixed |
 | I5 | Info | Null-prototype and symbol-keyed objects passed `assertReportForm` | Exactly `Object.prototype` and no symbol keys, at every level | Fixed |
 | I6 | Info | Year `0000` passed `parseStrictDate` | Shared `src/dates.ts` requires year ≥ 1970 (FreeScout's own fallback date); affects search, ticket_volume and reports alike; the old "years 0000-0099 are real dates" test now asserts refusal | Fixed |
 | I7 | Info | Non-plain user-table values (e.g. "50%") lost their text | Metrics already keep `raw_value` (tested for the satisfaction score); users-table rows get `raw_values` when a cell is not a plain number, with a note | Fixed |
+
+## 2026-10-31 — Phase C: agent_stats, conversations / time tracking reports (guard widened, no new POST path)
+
+No new POST path or call site: the source scan still finds one `/reports/ajax` literal, two `REPORTS_AJAX` references,
+one `action: "report",` and the unchanged `send_reply` / `conversation_change_status` / `tags/ajax` counts.
+`assertReportForm` was **deliberately widened** and tightened at the same time:
+- `report_name` may now also be `conversations` or `time` (the wire name of `/reports/time-tracking`; the slug
+  `time-tracking` stays refused), both read-only reports FreeScout's own pages request the same way (§11.2 body 6);
+- the filter keys are an exact per-report whitelist: `user` only for productivity and satisfaction; conversations and
+  time refuse `filters.user` and any `chart`;
+- `chart.group_by` is pinned to `d` (week/month series are no longer requested; periods are summed client-side).
+`agent_stats` sends up to 31 report requests per call (one per bucket), all built and asserted before the first
+request, serial and paced by `FREESCOUT_STATS_DELAY_MS`; it does not wrap the port (no extra `ajaxPost` occurrence).
+Customer names and conversation subjects of the two new reports are returned only with `include_names: true` and
+labelled untrusted; unrecognised tables are reported by shape only. Regression tests: the red-team file ("the one
+Reports POST": refused names, per-report key whitelist, chart pinned to `d`, MCP calls of all report tools including
+`agent_stats` with only pinned keys) and `test/agent-stats.test.ts`, `test/reports-conversations-time.test.ts`.
+
+### Review fixes (2026-10-31, reports / agent_stats)
+No new POST path or call site; the source scan now also pins the total `port.ajaxPost(` call sites in `src/` (9:
+eight in `src/operations.ts`, `fetchReport` in `src/reports.ts`) besides the per-constant counts.
+
+| # | Severity | Finding | Fix | Status |
+|---|---|---|---|---|
+| 1 | Medium | `include_names: false` left unrecognised time-table columns (`extra_columns`, possibly customer-written) in the output | `extra_columns` dropped from time users / conversations / customers rows unless `include_names: true`; note and notice say so; test with injected Customer/Email columns. Conversations-report rows have no `extra_columns` | Fixed |
+| 2 | Medium | With the default metric no chart keys were sent, so the series granularity was FreeScout's choice | Productivity requests always send `chart[group_by]=d&chart[type]=<metric>` (the browser's body 7 shape); guard still pins `d` | Fixed |
+| 3 | Medium | `agent_stats` mid-run failure kept partial sums in `totals`/`user_totals`; session errors became success-shaped | Incomplete runs: `totals: null`, `user_totals: null` (buckets keep their data); `AuthError` and report 403s are rethrown as tool errors | Fixed |
+| 4 | Low | `customers_helped` (distinct customers) summed across buckets | Dropped from `totals` and `user_totals`; per bucket only | Fixed |
+| 5 | Low | The no-periods warning blamed length/grouping for a metric-only mismatch | Branched wording | Fixed |
+| 6 | Low | §11.4c duration grammar narrower than the parser | Doc lists every accepted unit token | Fixed |
+| 7 | Low | Reports scan counted only the `/reports/ajax` literal and its call | Total `port.ajaxPost(` call sites pinned (9) with a listing comment | Fixed |
+| 8 | Info | Production conversation numbers / customer ids in report fixtures | Rewritten to synthetic ids (conversations 1001+, customers 501+) in fixtures and tests | Fixed |
+| 9 | Info | PLAN Phase C item 2 still described `chart.raw` | Reworded to what was built | Fixed |
+| 10 | New | `agent_stats` bucket `users: null` when a report has no users table (seen live for today) | `users: []` with a note | Fixed |
+| 11 | Leftover | `FREESCOUT_STATS_DELAY_MS` comments named only `ticket_volume` | Mention `agent_stats` | Fixed |

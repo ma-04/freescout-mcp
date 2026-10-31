@@ -4,7 +4,7 @@ import * as cheerio from "cheerio";
 import { describe, expect, it } from "vitest";
 import type { FreeScoutPort, HtmlPage } from "../src/client.js";
 import { PermissionError } from "../src/errors.js";
-import { capThreads, getCustomer, searchConversations } from "../src/operations.js";
+import { capThreads, getCustomer, listConversations, searchConversations } from "../src/operations.js";
 import type { ParsedConversation, ParsedThread } from "../src/parsers/conversation.js";
 
 const BASE = "https://freescout.example.com";
@@ -89,5 +89,50 @@ describe("searchConversations single-match redirect", () => {
     expect(r.conversations).toHaveLength(1);
     expect(r.conversations[0]!.preview).toBeTruthy();
     expect(r.conversations[0]!.preview).not.toMatch(/INTERNAL|churn/);
+  });
+});
+
+describe("tags in conversation rows reach every tool that lists rows", () => {
+  const CUSTOMER_TAGGED = CUSTOMER.replace(
+    /(<td class="conv-subject">[\s\S]*?<p>)(\s*Dashboard charts)/,
+    '$1<span class="conv-tags"><span class="tag tag-c-0" data-tag-url="' + BASE + '/search?f%5Btag%5D=safari">safari</span> ' +
+      '<span class="tag tag-c-1" data-tag-url="' + BASE + '/search?f%5Btag%5D=vip">vip</span></span>&nbsp;$2',
+  );
+  const page = (path: string, html: string): HtmlPage => ({ $: cheerio.load(html), url: new URL(path, BASE).toString(), status: 200 });
+  const port = (routes: Record<string, string>): FreeScoutPort => ({
+    async getHtml(path: string) {
+      const html = routes[path];
+      if (html === undefined) throw new Error(`unexpected GET ${path}`);
+      return page(path, html);
+    },
+    async ajaxPost<T>(): Promise<T> {
+      throw new Error("no ajax expected");
+    },
+  });
+
+  it("get_customer.conversations: subject without the tag names, tags separately", async () => {
+    expect(CUSTOMER_TAGGED).not.toBe(CUSTOMER);
+    const r = await getCustomer(port({ "/customers/9/": CUSTOMER_TAGGED, "/customers/9/edit": EDIT }), 9);
+    expect(r.conversations[0]).toMatchObject({ id: 9, subject: "Dashboard charts not loading in Safari 18", tags: ["safari", "vip"] });
+  });
+
+  it("list_conversations rows carry tags (production markup)", async () => {
+    const r = await listConversations(port({ "/mailbox/1/12": raw("search-results-tags.html") }), 1, 12);
+    expect(r.conversations.map((c) => [c.subject, c.tags])).toContainEqual(["Subject two", ["tag-alpha", "tag-beta"]]);
+  });
+
+  it("search_conversations: table rows and the single-match redirect both carry tags", async () => {
+    const t = await searchConversations(port({ "/search?q=resize": raw("search-results-tags.html") }), "resize");
+    expect(t.conversations.find((c) => c.id === 1004)).toMatchObject({ subject: "Subject four", tags: ["tag-delta", "tag-epsilon", "tag-zeta"] });
+    const redirect: FreeScoutPort = {
+      async getHtml() {
+        return { $: cheerio.load(raw("conversation-9-tags.html")), url: `${BASE}/conversation/9?folder_id=17`, status: 200 };
+      },
+      async ajaxPost<T>(): Promise<T> {
+        throw new Error("unused");
+      },
+    };
+    const one = await searchConversations(redirect, "#9");
+    expect(one.conversations[0]!.tags).toEqual(["safari", "Charts & Graphs", "vip"]);
   });
 });

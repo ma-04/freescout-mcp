@@ -14,7 +14,8 @@ export function registerGetCustomer(server: McpServer, { client }: ToolContext):
         "conversations, by customer id (from get_conversation's customer.id) or by email address. Customer " +
         "profiles are global in FreeScout: the profile is returned even for a customer who only wrote to " +
         "mailboxes this agent cannot view, but the conversation list is filtered by permission (only " +
-        "conversations in mailboxes this agent can view are listed). " + PERMISSION_NOTE,
+        "conversations in mailboxes this agent can view are listed). Each conversation row has tags (Tag module names, " +
+        "[] without the module). " + PERMISSION_NOTE,
       inputSchema: {
         id: z.number().int().positive().optional().describe("Customer id."),
         email: z.string().trim().email().optional().describe("Customer email (used when id is not given)."),

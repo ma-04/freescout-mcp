@@ -48,3 +48,71 @@ export function addDays(d: Date, n: number): Date {
   out.setUTCDate(out.getUTCDate() + n);
   return out;
 }
+
+/** Inclusive number of days from..to (both UTC midnights). */
+export function daySpan(from: Date, to: Date): number {
+  return Math.round((to.getTime() - from.getTime()) / 86_400_000) + 1;
+}
+
+export const BUCKET_PERIODS = ["day", "week", "month"] as const;
+export type BucketPeriod = (typeof BUCKET_PERIODS)[number];
+/** monday = ISO weeks (Monday-Sunday); sunday = Sunday-Saturday weeks (FreeScout's own week chart). */
+export const WEEK_STARTS = ["monday", "sunday"] as const;
+export type WeekStart = (typeof WEEK_STARTS)[number];
+
+export interface DateBucket {
+  /** YYYY-MM-DD, inclusive. */
+  start: string;
+  /** YYYY-MM-DD, inclusive. */
+  end: string;
+}
+
+/**
+ * Inclusive buckets covering from..to: days; weeks starting on `weekStart` (default Monday, ISO); calendar months.
+ * The first and last bucket are clipped to from/to. With `max`, throws as soon as there would be more than `max`
+ * buckets (so a huge range is refused without building it); callers check this before any request.
+ */
+export function dateBuckets(from: Date, to: Date, period: BucketPeriod, weekStart: WeekStart = "monday", max?: number): DateBucket[] {
+  if (from.getTime() > to.getTime()) throw new Error(`from (${formatDate(from)}) must not be later than to (${formatDate(to)})`);
+  if (!(BUCKET_PERIODS as readonly string[]).includes(period)) throw new Error(`period must be one of ${BUCKET_PERIODS.join("|")}`);
+  if (!(WEEK_STARTS as readonly string[]).includes(weekStart)) throw new Error(`week_start must be one of ${WEEK_STARTS.join("|")}`);
+  const firstDow = weekStart === "monday" ? 1 : 0;
+  const out: DateBucket[] = [];
+  let cur = from;
+  while (cur.getTime() <= to.getTime()) {
+    let last: Date;
+    if (period === "day") last = cur;
+    else if (period === "week") last = addDays(cur, 6 - ((cur.getUTCDay() - firstDow + 7) % 7)); // last day of cur's week
+    else last = new Date(Date.UTC(cur.getUTCFullYear(), cur.getUTCMonth() + 1, 0)); // last day of cur's month
+    if (last.getTime() > to.getTime()) last = to;
+    out.push({ start: formatDate(cur), end: formatDate(last) });
+    if (max !== undefined && out.length > max) {
+      throw new Error(
+        `${formatDate(from)}..${formatDate(to)} by ${period} is more than ${max} buckets. Nothing was requested: use a ` +
+          "coarser period or a shorter range.",
+      );
+    }
+    cur = addDays(last, 1);
+  }
+  return out;
+}
+
+/**
+ * Sum a per-day series (index 0 = `from`) into the given buckets (which must lie inside the series' range). A bucket
+ * whose days include a null point, or reach outside the series, is null (no data), never a partial sum or 0.
+ */
+export function sumIntoBuckets(series: ReadonlyArray<number | null>, from: Date, buckets: readonly DateBucket[]): Array<number | null> {
+  return buckets.map((b) => {
+    const i = daySpan(from, parseStrictDate(b.start)!) - 1;
+    const j = daySpan(from, parseStrictDate(b.end)!) - 1;
+    if (i < 0 || j >= series.length || i > j) return null;
+    let sum = 0;
+    for (let k = i; k <= j; k++) {
+      const v = series[k];
+      if (v === null || v === undefined) return null;
+      sum += v;
+    }
+    // Chart points can be decimals; keep the sum free of binary float noise (0.1 + 0.2).
+    return Math.round(sum * 1e6) / 1e6;
+  });
+}

@@ -17,11 +17,11 @@ import { silentLogger } from "../src/log.js";
 import { buildSearchParams, listAssignees, searchConversations } from "../src/operations.js";
 import { DEFAULT_STATS_DELAY_MS, loadBaseConfig } from "../src/config.js";
 import { parseConversationTable } from "../src/parsers/conversation-table.js";
-import { parseSearchFilters } from "../src/parsers/search-filters.js";
+import { offeredFilters, parseSearchFilters } from "../src/parsers/search-filters.js";
 import { Session } from "../src/session.js";
 import { makeBuckets, ticketVolume } from "../src/stats.js";
 import { registerTools } from "../src/tools/index.js";
-import { FakeFreeScout, searchPage } from "./fake-freescout.js";
+import { CORE_SEARCH_FILTERS, FakeFreeScout, searchPage } from "./fake-freescout.js";
 
 const BASE = "https://freescout.example.com";
 /** ticket_volume without the production pause between requests. */
@@ -91,6 +91,16 @@ describe("buildSearchParams wire form", () => {
     expect(isStrictDate("2028-02-29")).toBe(true);
     expect(isStrictDate("2026-02-29")).toBe(false);
     expect(() => buildSearchParams({ after: "2026-10-27", before: "2026-10-26" })).toThrow(/must not be later/);
+  });
+
+  it("the demo's filter menu has the core filters and no tag (no Tags module); a page without a menu is null", () => {
+    expect(offeredFilters(load("search-empty-result.html"))?.sort()).toEqual([...CORE_SEARCH_FILTERS, "company"].sort());
+    expect(offeredFilters(cheerio.load("<p>x</p>"))).toBeNull();
+    // Only the filter menu and the filter form count: a stray data-filter elsewhere on the page does not.
+    expect(offeredFilters(cheerio.load('<div data-filter="tag">x</div>'))).toBeNull();
+    expect(
+      offeredFilters(cheerio.load('<ul class="sidebar-menu"><li><a data-filter="status">s</a></li></ul><span data-filter="tag"></span>')),
+    ).toEqual(["status"]);
   });
 
   it("needs q or a filter; mailbox_id alone is not enough", () => {
@@ -385,6 +395,13 @@ describe("tool layer", () => {
       ["search_conversations", { status: "active" }],
       ["search_conversations", { status: ["open"] }],
       ["search_conversations", { after: "2026-10-27", before: "2026-10-26" }],
+      ["search_conversations", { following: false }],
+      ["search_conversations", { number: 0 }],
+      ["search_conversations", { id: -3 }],
+      ["search_conversations", { tag: "" }],
+      ["search_conversations", { tag: "x".repeat(101) }],
+      ["search_conversations", { attachment_name: "  " }],
+      ["search_conversations", { q: "#8", number: 7 }],
       ["ticket_volume", { from: "2026-10-01", to: "2026-11-15" }],
       ["ticket_volume", { from: "2026-10-01", to: "2026-10-1" }],
       ["ticket_volume", { from: "2026-10-01", to: "2026-10-02", period: "year" }],
@@ -624,6 +641,144 @@ describe("review fixes (2026-10-28)", () => {
         assigned: 2,
       });
       expect(realForced.assigned_filter_forced).toBe("unassigned");
+    });
+  });
+});
+
+describe("search parity (2026-10-31): tag, following, number, id, attachment_name", () => {
+  const wire = (o: Parameters<typeof buildSearchParams>[0]) => [...buildSearchParams(o).params.entries()];
+
+  it("wire names and order; existing filters keep their place", () => {
+    expect(wire({ tag: " billing ", following: true, id: 12, attachment_name: " invoice 7.pdf ", number: 7 })).toEqual([
+      ["f[tag]", "billing"],
+      ["f[following]", "yes"],
+      ["f[id]", "12"],
+      ["f[attachment name]", "invoice 7.pdf"],
+      ["f[number]", "7"],
+    ]);
+    // Same encoding a browser GET form submit produces (application/x-www-form-urlencoded: space -> +).
+    expect(buildSearchParams({ attachment_name: "a b" }).params.toString()).toBe("f%5Battachment+name%5D=a+b");
+    expect(buildSearchParams({ tag: "Charts & Graphs" }).params.toString()).toBe("f%5Btag%5D=Charts+%26+Graphs");
+    expect(wire({ q: "x", status: ["closed"], subject: "s", tag: "t", page: 3 })).toEqual([
+      ["q", "x"],
+      ["f[status][]", "3"],
+      ["f[subject]", "s"],
+      ["f[tag]", "t"],
+      ["page", "3"],
+    ]);
+    expect(buildSearchParams({ tag: "t", following: true, id: 3, attachment_name: "a", number: 4 }).filters).toEqual({
+      tag: "t",
+      following: true,
+      id: 3,
+      attachment_name: "a",
+      number: 4,
+    });
+  });
+
+  it("each new filter alone satisfies the q-or-filter guard", () => {
+    for (const o of [{ tag: "t" }, { following: true as const }, { number: 5 }, { id: 5 }, { attachment_name: "a" }]) {
+      expect(() => buildSearchParams(o)).not.toThrow();
+    }
+    expect(() => buildSearchParams({})).toThrow(/tag, following, number, id, attachment_name/);
+  });
+
+  it("rejects bad values before any request", () => {
+    expect(() => buildSearchParams({ following: false as never })).toThrow(/following/);
+    expect(() => buildSearchParams({ number: 0 })).toThrow(/number/);
+    expect(() => buildSearchParams({ number: 1.5 })).toThrow(/number/);
+    expect(() => buildSearchParams({ id: -1 })).toThrow(/id must/);
+    expect(() => buildSearchParams({ tag: "  " })).toThrow(/tag must/);
+    expect(() => buildSearchParams({ tag: "x".repeat(101) })).toThrow(/tag must/);
+    expect(() => buildSearchParams({ attachment_name: "" })).toThrow(/attachment_name must/);
+    expect(() => buildSearchParams({ attachment_name: "x".repeat(201) })).toThrow(/attachment_name must/);
+  });
+
+  it("number and a numeric q: one f[number], never q plus a filter; conflicting numbers are refused", () => {
+    expect(wire({ number: 9 })).toEqual([["f[number]", "9"]]);
+    expect(wire({ q: "#9", number: 9 })).toEqual([["f[number]", "9"]]);
+    expect(buildSearchParams({ q: "#9", number: 9 })).toMatchObject({ byNumber: true, filters: { number: 9 } });
+    expect(wire({ q: "9", number: 9, status: ["active"] })).toEqual([["f[status][]", "1"], ["f[number]", "9"]]);
+    expect(() => buildSearchParams({ q: "#8", number: 9 })).toThrow(/conflicts with number/);
+    // Text q with an explicit number is a normal filtered text search.
+    expect(wire({ q: "refund", number: 9 })).toEqual([["q", "refund"], ["f[number]", "9"]]);
+    expect(buildSearchParams({ q: "refund", number: 9 }).byNumber).toBe(false);
+  });
+
+  it("numbers above 2^53 - 1 are refused, never rounded; a long numeric q alone stays exact text", () => {
+    const big = "12345678901234567890"; // Number(big) rounds to ...7168
+    expect(() => buildSearchParams({ q: big, mailbox_id: 1 })).toThrow(/too large for a conversation number/);
+    expect(() => buildSearchParams({ q: `#${big}`, status: ["active"] })).toThrow(/too large/);
+    expect(() => buildSearchParams({ q: big, number: 5 })).toThrow(/too large/);
+    expect(() => buildSearchParams({ number: 2 ** 53 })).toThrow(/number must be a positive integer up to 9007199254740991/);
+    expect(() => buildSearchParams({ id: 1.2e19 })).toThrow(/id must be a positive integer/);
+    expect(() => buildSearchParams({ customer_id: 2 ** 60 })).toThrow(/customer_id/);
+    expect(wire({ number: Number.MAX_SAFE_INTEGER })).toEqual([["f[number]", "9007199254740991"]]);
+    expect(wire({ q: big })).toEqual([["q", big]]);
+  });
+
+  describe("against the fake FreeScout", () => {
+    let fs: FakeFreeScout;
+    let client: FreeScoutClient;
+    const searches = () => fs.searchRequests.map((p) => p.toString());
+    beforeEach(async () => {
+      fs = new FakeFreeScout();
+      await fs.start();
+      client = new FreeScoutClient(new Session({ baseUrl: fs.base, cookie: fs.mintLoggedInCookie(), logger: silentLogger, timeoutMs: 5000 }));
+      const conv = (id: number) => fs.searchConvs.find((c) => c.id === id)!;
+      conv(2).tags = ["billing", "vip"];
+      conv(9).tags = ["billing"];
+      conv(4).following = true;
+      conv(3).attachment_names = ["Invoice-2026.pdf"];
+    });
+    afterEach(async () => {
+      await fs?.stop();
+    });
+
+    it("each new key is sent exactly once, and rows come back with tags and clean subjects", async () => {
+      const t = await searchConversations(client, { tag: "billing" });
+      expect(t.conversations.map((c) => [c.id, c.subject, c.tags])).toEqual([
+        [9, "Fake subject 9", ["billing"]],
+        [2, "Fake subject 2", ["billing", "vip"]],
+      ]);
+      expect(t.filters).toEqual({ tag: "billing" });
+      expect((await searchConversations(client, { following: true })).conversations.map((c) => c.id)).toEqual([4]);
+      expect((await searchConversations(client, { id: 7 })).conversations.map((c) => c.id)).toEqual([7]);
+      expect((await searchConversations(client, { attachment_name: "invoice" })).conversations.map((c) => c.id)).toEqual([3]);
+      expect((await searchConversations(client, { number: 5, status: ["closed"] })).conversations.map((c) => c.id)).toEqual([5]);
+      expect(searches()).toEqual([
+        "f%5Btag%5D=billing",
+        "f%5Bfollowing%5D=yes",
+        "f%5Bid%5D=7",
+        "f%5Battachment+name%5D=invoice",
+        "f%5Bstatus%5D%5B%5D=3&f%5Bnumber%5D=5",
+      ]);
+      for (const q of fs.searchRequests) {
+        for (const k of new Set(q.keys())) if (!k.endsWith("[]")) expect(q.getAll(k), k).toHaveLength(1);
+      }
+    });
+
+    it("a module filter the install does not offer is reported, never silently treated as applied", async () => {
+      const ok = await searchConversations(client, { tag: "billing", attachment_name: "x" });
+      expect(ok.unsupported_filters).toBeUndefined();
+      expect(ok.unverified_filters).toBeUndefined();
+      fs.searchFilterNames = [...CORE_SEARCH_FILTERS]; // like the demo: no Tags module
+      const r = await searchConversations(client, { tag: "billing", status: ["active"] });
+      expect(r.unsupported_filters).toEqual(["tag"]);
+      expect(r.note).toMatch(/does not offer tag .*NOT filtered by it/);
+      // Core filters the page offers are not flagged.
+      expect((await searchConversations(client, { following: true, id: 4 })).unsupported_filters).toBeUndefined();
+      // following/id/number are checked too: a search page without them (older install) is reported.
+      fs.searchFilterNames = CORE_SEARCH_FILTERS.filter((n) => !["following", "id", "number"].includes(n));
+      const old = await searchConversations(client, { following: true, id: 4, number: 4 });
+      expect(old.unsupported_filters).toEqual(["following", "id", "number"]);
+      expect(old.note).toMatch(/does not offer following, id, number \(older FreeScout version\).*NOT filtered/);
+      const mixed = await searchConversations(client, { tag: "billing", id: 4 });
+      expect(mixed.note).toMatch(/\(module not installed or older FreeScout version\)/);
+    });
+
+    it("ticket_volume requests are unchanged by the new filters", async () => {
+      await tv(client, { from: "2026-10-26", to: "2026-10-26", assigned: 2, mailbox_id: 1 });
+      expect(searches()).toEqual([`f%5Bassigned%5D=2&f%5Bmailbox%5D=1&${ST}&f%5Bafter%5D=2026-10-26&f%5Bbefore%5D=2026-10-26`]);
     });
   });
 });

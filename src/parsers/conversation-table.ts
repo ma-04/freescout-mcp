@@ -10,6 +10,13 @@ export interface ConversationRow {
   subject: string;
   customer: { name: string | null; email: string | null } | null;
   preview: string | null;
+  /**
+   * Mailbox name from the `[Name]<br>` prefix FreeScout puts in front of the preview when a list spans mailboxes
+   * (search results). Only read when the table is marked `data-param_show_mailbox="1"` (FreeScout's own switch for
+   * that prefix); null otherwise, so a preview that merely starts with "[Text]<br>" is left alone. The mailbox id is
+   * not in the row.
+   */
+  mailbox_name: string | null;
   /** Inferred: FreeScout lists have no status column (see docs/freescout-endpoints.md §4.2). */
   status: ConversationStatus | null;
   assignee: string | null;
@@ -17,6 +24,11 @@ export interface ConversationRow {
   thread_count: number | null;
   starred: boolean;
   has_attachments: boolean;
+  /**
+   * Tag names from the Tags module's chips (`span.conv-tags` inside the subject paragraph), in display order,
+   * deduplicated. Always [] where the module is not installed.
+   */
+  tags: string[];
   url: string;
 }
 
@@ -36,15 +48,58 @@ export interface ConversationTable {
  * `folderType` is the folder being listed (if any); it is the only status source
  * for rows in Closed/Spam folders, which carry no badge.
  */
+/**
+ * Split `<p class="conv-preview">[Mailbox]<br>text</p>` into the mailbox name and the preview text. `showMailbox` is
+ * the table's `data-param_show_mailbox`: FreeScout's conversations table emits the prefix only when it is set, so
+ * without it the preview is returned untouched (a folder-list preview "[URGENT]<br>..." is the customer's text).
+ */
+function splitPreview(
+  $: CheerioAPI,
+  p: ReturnType<CheerioAPI>,
+  showMailbox: boolean,
+): { mailbox_name: string | null; preview: string | null } {
+  if (!p.length) return { mailbox_name: null, preview: null };
+  if (!showMailbox) return { mailbox_name: null, preview: textOrNull(p.text()) };
+  const clone = p.clone();
+  const nodes = clone.contents().toArray().filter((n) => !(n.type === "text" && !squish($(n).text())));
+  const first = nodes[0];
+  const second = nodes[1];
+  if (first?.type === "text" && second?.type === "tag" && (second as { name?: string }).name === "br") {
+    const m = /^\s*\[(.+)\]\s*$/s.exec($(first).text());
+    if (m) {
+      $(first).remove();
+      $(second).remove();
+      return { mailbox_name: textOrNull(m[1]), preview: textOrNull(clone.text()) };
+    }
+  }
+  return { mailbox_name: null, preview: textOrNull(p.text()) };
+}
+
 export function parseConversationTable($: CheerioAPI, base: string, folderType?: FolderType | null): ConversationTable {
   const table = $("table.table-conversations").first();
   const conversations: ConversationRow[] = [];
+  const showMailboxAttr = squish(table.attr("data-param_show_mailbox"));
+  const showMailbox = showMailboxAttr !== "" && showMailboxAttr !== "0";
   table.find("tbody tr.conv-row[data-conversation_id]").each((_, el) => {
     const tr = $(el);
     const id = intOrNull(tr.attr("data-conversation_id"));
     if (id === null) return;
     const classes = (tr.attr("class") ?? "").split(/\s+/);
     const subjectP = tr.find("td.conv-subject a p").not(".conv-preview").first();
+    // The Tags module renders its chips inside the subject paragraph: read them, then read the subject without them.
+    // Deduplicated case-insensitively, first spelling kept (the key tagKey uses in operations.ts: the server
+    // normalises tag names, so "Billing" and "billing" are one tag).
+    const tags: string[] = [];
+    const tagKeys = new Set<string>();
+    subjectP.find(".conv-tags .tag").each((_, t) => {
+      const name = squish($(t).text());
+      const key = name.toLowerCase();
+      if (name && !tagKeys.has(key)) {
+        tagKeys.add(key);
+        tags.push(name);
+      }
+    });
+    const subjectText = squish(subjectP.clone().find(".conv-tags").remove().end().text());
 
     // Status: explicit badges first (lock/ban-circle are rendered outside the matching folder).
     let status: ConversationStatus | null;
@@ -60,8 +115,16 @@ export function parseConversationTable($: CheerioAPI, base: string, folderType?:
     let assignee: string | null = null;
     if (custTd.length && !custTd.hasClass("conv-owner-mobile")) {
       const a = custTd.find("a").first();
+      // Demo (1.8.248) wraps the name in .conv-customer-name; the production install renders it as the link's own text.
+      const nameEl = custTd.find(".conv-customer-name").first();
+      const ownText = a
+        .contents()
+        .toArray()
+        .filter((n) => n.type === "text")
+        .map((n) => $(n).text())
+        .join(" ");
       customer = {
-        name: textOrNull(custTd.find(".conv-customer-name").first().text()),
+        name: nameEl.length ? textOrNull(nameEl.text()) : textOrNull(ownText),
         email: textOrNull(custTd.find(".conv-email").first().text()) ?? textOrNull(a.attr("title")),
       };
       assignee = textOrNull(custTd.find(".conv-owner-mobile").first().text());
@@ -74,7 +137,9 @@ export function parseConversationTable($: CheerioAPI, base: string, folderType?:
 
     const counter = custTd.find(".conv-counter").first();
     const dateA = tr.find("td.conv-date a").first();
-    const tip = dateA.attr("title") ?? dateA.attr("aria-description") ?? "";
+    // Server HTML has the tooltip in title (and aria-description); after Bootstrap's tooltip init (a browser capture)
+    // title is "" and the text sits in data-original-title, so empty strings must fall through.
+    const tip = dateA.attr("title") || dateA.attr("aria-description") || dateA.attr("data-original-title") || "";
     // "Last reply by Customer<br/>Oct 22, 2026 06:42" or "Created by Customer<br/>…"
     const tipM = /^\s*(?:last reply|created)\s+by\s+([^<]+?)\s*<br\s*\/?>\s*(.+)$/i.exec(tip);
     const href = tr.find("td.conv-subject a").first().attr("href") ?? `/conversation/${id}`;
@@ -82,9 +147,9 @@ export function parseConversationTable($: CheerioAPI, base: string, folderType?:
     conversations.push({
       id,
       number: intOrNull(tr.find("td.conv-number a").first().text()),
-      subject: squish(subjectP.text()),
+      subject: subjectText,
       customer,
-      preview: textOrNull(tr.find("p.conv-preview").first().text()),
+      ...splitPreview($, tr.find("p.conv-preview").first(), showMailbox),
       status,
       assignee,
       last_activity: dateA.length
@@ -94,6 +159,7 @@ export function parseConversationTable($: CheerioAPI, base: string, folderType?:
       thread_count: custTd.length && !custTd.hasClass("conv-owner-mobile") ? (counter.length ? intOrNull(counter.text()) : 1) : null,
       starred: tr.find("i.conv-star").first().hasClass("glyphicon-star"),
       has_attachments: tr.find("i.glyphicon-paperclip").length > 0,
+      tags,
       url: new URL(href, base).toString(),
     });
   });

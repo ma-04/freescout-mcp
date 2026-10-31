@@ -91,6 +91,93 @@ describe("conversation table", () => {
     const t = parseConversationTable(fixture("customer-9.html"), BASE, null);
     expect(t.conversations).toHaveLength(1);
     expect(t.conversations[0]).toMatchObject({ id: 9, customer: null, assignee: "Demo Agent", status: "active" });
+    expect(t.conversations[0]!.tags).toEqual([]);
+  });
+
+  it("demo rows (no Tags module) have tags: [] and an unchanged subject", () => {
+    for (const f of ["mailbox-folder-mine.html", "mailbox-unassigned.html", "search-safari.html", "search-filters-only.html"]) {
+      for (const c of parseConversationTable(fixture(f), BASE, null).conversations) expect(c.tags).toEqual([]);
+    }
+  });
+
+  it("separates the Tags module's chips from the subject (production markup, synthetic values)", () => {
+    const t = parseConversationTable(fixture("search-results-tags.html"), BASE, null);
+    expect(t).toMatchObject({ total: 1234, range: { from: 1, to: 50 }, has_next_page: true, last_page: 25 });
+    expect(t.conversations.map((c) => [c.id, c.subject, c.tags, c.status])).toEqual([
+      [1001, "Subject one", [], "active"],
+      [1002, "Subject two", ["tag-alpha", "tag-beta"], "active"],
+      [1003, "Subject three", ["tag-gamma"], "closed"],
+      [1004, "Subject four", ["tag-delta", "tag-epsilon", "tag-zeta"], "pending"],
+    ]);
+    // Production rows have no .conv-customer-name span; the name is the link's own text.
+    expect(t.conversations.map((c) => [c.customer?.name ?? null, c.assignee, c.thread_count])).toEqual([
+      ["Mail Delivery Subsystem", null, 1],
+      ["Pat Example", "Agent One", 2],
+      ["Robin Test", "Agent Two", 8],
+      ["Sam Placeholder", "Agent One", 11],
+    ]);
+    // Rendered DOM: title="" and the tooltip moved to data-original-title; aria-description still has it.
+    expect(t.conversations.map((c) => c.last_activity)).toEqual([
+      { relative: "53 min ago", by: "Customer", at: "Oct 31, 2026 05:27pm" },
+      { relative: "1 day ago", by: "Customer", at: "Oct 30, 2026 05:29am" },
+      { relative: "3 days ago", by: "User", at: "Oct 28, 2026 05:37pm" },
+      { relative: "2 days ago", by: "User", at: "Oct 29, 2026 10:25am" },
+    ]);
+    expect(t.conversations[0]!.has_attachments).toBe(true);
+    expect(t.conversations[0]!.customer).toEqual({ name: "Mail Delivery Subsystem", email: null });
+    // Cross-mailbox results prefix the preview with "[Mailbox name]<br>".
+    expect(t.conversations.map((c) => c.mailbox_name)).toEqual(Array(4).fill("Example Support"));
+    expect(t.conversations[1]!.preview).toBe("Preview two.");
+    expect(t.conversations[0]!.preview).toBe("Preview one. Sent to someone@example.com.");
+  });
+
+  it("mailbox_name only on show-mailbox tables with the [Name]<br> prefix; elsewhere the preview is untouched", () => {
+    for (const f of ["mailbox-folder-mine.html", "mailbox-unassigned.html", "search-safari.html", "customer-9.html"]) {
+      for (const c of parseConversationTable(fixture(f), BASE, null).conversations) expect(c.mailbox_name).toBeNull();
+    }
+    const row = (preview: string, showMailbox = "1") =>
+      parseConversationTable(
+        cheerio.load(
+          `<table class="table-conversations" data-param_show_mailbox="${showMailbox}"><tbody><tr class="conv-row" data-conversation_id="7"><td class="conv-subject">` +
+            `<a href="/conversation/7"><p>S</p><p class="conv-preview">${preview}</p></a></td></tr></tbody></table>`,
+        ),
+        BASE,
+        null,
+      ).conversations[0]!;
+    expect(row("[Billing] see invoice")).toMatchObject({ mailbox_name: null, preview: "[Billing] see invoice" });
+    expect(row("[Billing]<br>see invoice")).toMatchObject({ mailbox_name: "Billing", preview: "see invoice" });
+    expect(row(" [Sales &amp; Support] <br/>hi there")).toMatchObject({ mailbox_name: "Sales & Support", preview: "hi there" });
+    expect(row("")).toMatchObject({ mailbox_name: null, preview: null });
+    // A folder list (no data-param_show_mailbox) or a single-mailbox search (empty) never splits the customer's text.
+    const folder = parseConversationTable(
+      cheerio.load(
+        `<table class="table-conversations"><tbody><tr class="conv-row conv-active" data-conversation_id="8"><td class="conv-subject">` +
+          `<a href="/conversation/8"><p>S</p><p class="conv-preview">[URGENT]<br>site is down</p></a></td></tr></tbody></table>`,
+      ),
+      BASE,
+      "unassigned",
+    ).conversations[0]!;
+    expect(folder).toMatchObject({ mailbox_name: null, preview: "[URGENT]site is down" });
+    expect(row("[URGENT]<br>site is down", "")).toMatchObject({ mailbox_name: null, preview: "[URGENT]site is down" });
+  });
+
+  it("dedupes tags, keeps their order, and still sees the lock badge next to them", () => {
+    const html =
+      `<table class="table-conversations"><tbody><tr class="conv-row" data-conversation_id="5"><td class="conv-subject">` +
+      `<a href="/conversation/5"><p><i class="glyphicon glyphicon-lock"></i> <span class="conv-tags">` +
+      `<span class="tag">b</span> <span class="tag">a</span> <span class="tag">b</span><span class="tag"> </span>` +
+      `<span class="tag">Billing</span> <span class="tag">billing</span> <span class="tag">BILLING </span></span>&nbsp;Hello</p>` +
+      `<p class="conv-preview">x</p></a></td></tr></tbody></table>`;
+    const [row] = parseConversationTable(cheerio.load(html), BASE, null).conversations;
+    expect(row).toMatchObject({ id: 5, subject: "Hello", tags: ["b", "a", "Billing"], status: "closed" });
+  });
+
+  it("only the title tooltip shapes: a plain title still parses (server-rendered HTML)", () => {
+    const html =
+      `<table class="table-conversations"><tbody><tr class="conv-row conv-active" data-conversation_id="6"><td class="conv-subject">` +
+      `<a href="/conversation/6"><p>Hi</p></a></td><td class="conv-date"><a title="Last reply by Customer&lt;br/&gt;Oct 30, 2026 05:29am">1 day ago</a></td></tr></tbody></table>`;
+    const [row] = parseConversationTable(cheerio.load(html), BASE, null).conversations;
+    expect(row!.last_activity).toEqual({ relative: "1 day ago", by: "Customer", at: "Oct 30, 2026 05:29am" });
   });
 });
 

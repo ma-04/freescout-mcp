@@ -72,14 +72,85 @@ export interface RatingRow {
   comment: string | null;
 }
 
+/** A FreeScout duration display string ("2 days 22 hours 37 minutes", "4 minutes") and its whole minutes. */
+export interface Duration {
+  raw: string;
+  /** null when the text is not an English days/hours/minutes(/seconds) duration (another UI language, new format). */
+  minutes: number | null;
+}
+
+/** Conversations report, "Most Active Customers | #". The name is customer-controlled (untrusted). */
+export interface CustomerCountRow {
+  customer_id: number | null;
+  name: string;
+  count: number | null;
+  raw_count?: string;
+}
+
+/** Conversations report, "Tags | #" (tag names come from the link text; the module links to a tag search). */
+export interface TagCountRow {
+  name: string;
+  count: number | null;
+  raw_count?: string;
+}
+
+/** Time tracking report rows. Durations by header match only; unrecognised columns verbatim in extra_columns. */
+export interface TimeRowBase {
+  time_spent: Duration | null;
+  extra_columns?: Record<string, string>;
+}
+export interface TimeUserRow extends TimeRowBase {
+  user_id: number | null;
+  name: string;
+  avg_time_spent_per_update: Duration | null;
+}
+export interface TimeConversationRow extends TimeRowBase {
+  conversation_id: number | null;
+  number: number | null;
+  /** Customer-written subject (untrusted); null when the row has none. */
+  subject: string | null;
+}
+export interface TimeCustomerRow extends TimeRowBase {
+  customer_id: number | null;
+  /** Customer-controlled (untrusted). */
+  name: string;
+}
+
+/** A table the parser did not recognise for this report: its shape only, never its cells (they may be customer text). */
+export interface OtherTable {
+  key: string;
+  title: string;
+  headers: string[];
+  row_count: number;
+}
+
+export type ReportKind = "productivity" | "satisfaction" | "conversations" | "time";
+
+export interface ChartOptions {
+  selected_type: string | null;
+  /** Every `select#rpt-chart-type` option (value + display label). */
+  types: Array<{ value: string; label: string }>;
+  group_bys: string[];
+  active_group_by: string | null;
+}
+
 export interface ParsedReport {
   metrics: ReportMetric[];
   /** Tables with a `% | Δ` header, keyed by slug of their title (first_response_time, response_time, ...). */
   distributions: Record<string, Distribution>;
   users: ReportUserRow[] | null;
   ratings: RatingRow[] | null;
-  /** From the fragment's own chart options (productivity only): `select#rpt-chart-type` and `#rpt-group-by`. */
-  chart_options: { selected_type: string | null; group_bys: string[]; active_group_by: string | null } | null;
+  /** From the fragment's own chart options (productivity, conversations): `select#rpt-chart-type` and `#rpt-group-by`. */
+  chart_options: ChartOptions | null;
+  /** Conversations report only (null when the table is absent). */
+  most_active_customers?: CustomerCountRow[] | null;
+  tags?: TagCountRow[] | null;
+  /** Time tracking report only (null when the table is absent). */
+  time_users?: TimeUserRow[] | null;
+  time_conversations?: TimeConversationRow[] | null;
+  time_customers?: TimeCustomerRow[] | null;
+  /** Conversations / time tracking: tables that were not recognised (shape only). */
+  other_tables?: OtherTable[];
 }
 
 /** "Customers Helped" -> "customers_helped"; falls back to `fallback` for titles without ASCII letters/digits. */
@@ -272,12 +343,186 @@ function parseRatings($: CheerioAPI, table: cheerio.Cheerio<AnyNode>): RatingRow
   return out;
 }
 
-/** Parse the `report` HTML fragment of a `POST /reports/ajax` answer (§11.4). */
-export function parseReportHtml(html: string): ParsedReport {
+const DURATION_UNITS: Record<string, number> = {
+  day: 86_400, days: 86_400, d: 86_400,
+  hour: 3_600, hours: 3_600, h: 3_600,
+  minute: 60, minutes: 60, min: 60, mins: 60, m: 60,
+  second: 1, seconds: 1, sec: 1, secs: 1, s: 1,
+};
+
+/**
+ * "2 days 22 hours 37 minutes" -> 4237; "4 minutes" -> 4; "1 hour 10 minutes" -> 70. The whole text must be
+ * `<integer> <unit>` pairs (English units, singular or plural); anything else gives minutes null. Seconds round to
+ * the nearest minute.
+ */
+export function parseDuration(raw: string | null | undefined): Duration {
+  const text = squish(raw ?? "");
+  const re = /(\d+)\s*([a-z]+)\s*/giy;
+  let seconds = 0;
+  let pairs = 0;
+  let pos = 0;
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    const unit = DURATION_UNITS[m[2]!.toLowerCase()];
+    if (unit === undefined) return { raw: text, minutes: null };
+    seconds += Number(m[1]) * unit;
+    pairs++;
+    pos = re.lastIndex;
+  }
+  if (pairs === 0 || pos !== text.length) return { raw: text, minutes: null };
+  return { raw: text, minutes: Math.round(seconds / 60) };
+}
+
+function uniqueSlugs(head: string[], from: number): string[] {
+  const seen = new Set<string>();
+  return head.slice(from).map((h, i) => {
+    let k = slug(h, `column_${i + from + 1}`);
+    while (seen.has(k)) k += "_";
+    seen.add(k);
+    return k;
+  });
+}
+
+/** Two-column `<link> | #` tables of the conversations report. */
+function parseCountRows($: CheerioAPI, table: cheerio.Cheerio<AnyNode>) {
+  return dataRows($, table)
+    .toArray()
+    .map((tr) => {
+      const tds = $(tr).find("td");
+      const link = tds.eq(0).find("a").first();
+      const raw = squish(tds.eq(1).text());
+      const count = plainNumber(raw);
+      return { link, name: squish((link.length ? link : tds.eq(0)).text()), count, ...(count === null ? { raw_count: raw } : {}) };
+    });
+}
+
+/** Rows of a time tracking table: the first cell is the subject, the rest are keyed by header slug. */
+function parseTimeRows($: CheerioAPI, table: cheerio.Cheerio<AnyNode>, head: string[]) {
+  const keys = uniqueSlugs(head, 1);
+  return dataRows($, table)
+    .toArray()
+    .map((tr) => {
+      const tds = $(tr).find("td");
+      let time_spent: Duration | null = null;
+      let avg: Duration | null = null;
+      const extra: Record<string, string> = {};
+      keys.forEach((k, i) => {
+        const text = squish(tds.eq(i + 1).text());
+        if (k === "time_spent") time_spent = parseDuration(text);
+        else if (k === "avg_time_spent_per_update") avg = parseDuration(text);
+        else extra[k] = text;
+      });
+      return { first: tds.eq(0), time_spent, avg, extra: Object.keys(extra).length ? extra : undefined };
+    });
+}
+
+const CUSTOMER_HREF = /\/customers\/(\d+)/;
+
+function parseConversationsTables($: CheerioAPI, out: ParsedReport): void {
+  out.most_active_customers = null;
+  out.tags = null;
+  out.other_tables = [];
+  $("#rpt-tables table").each((i, el) => {
+    const table = $(el);
+    const head = headers($, table);
+    const key = slug(head[0] ?? "", "");
+    if (table.find('a[href*="/customers/"]').length || key === "most_active_customers") {
+      out.most_active_customers = parseCountRows($, table).map(({ link, name, count, ...rest }) => ({
+        customer_id: idFromHref(link.attr("href"), CUSTOMER_HREF),
+        name,
+        count,
+        ...rest,
+      }));
+    } else if (table.find('a[href*="f%5Btag%5D"], a[href*="f[tag]"]').length || key === "tags") {
+      out.tags = parseCountRows($, table).map(({ link: _l, ...rest }) => rest);
+    } else {
+      out.other_tables!.push({ key: slug(head[0] ?? "", `table_${i + 1}`), title: head[0] ?? "", headers: head, row_count: dataRows($, table).length });
+    }
+  });
+}
+
+function parseTimeTables($: CheerioAPI, out: ParsedReport): void {
+  out.time_users = null;
+  out.time_conversations = null;
+  out.time_customers = null;
+  out.other_tables = [];
+  $("#rpt-tables table").each((i, el) => {
+    const table = $(el);
+    const head = headers($, table);
+    const key = slug(head[0] ?? "", "");
+    const rows = parseTimeRows($, table, head);
+    const extra = (x: Record<string, string> | undefined) => (x ? { extra_columns: x } : {});
+    if (table.find('a[href*="/users/profile/"]').length || key === "user") {
+      out.time_users = rows.map((r) => {
+        const a = r.first.find("a").first();
+        return {
+          user_id: idFromHref(a.attr("href"), /\/users\/profile\/(\d+)/),
+          name: squish((a.length ? a : r.first).text()),
+          time_spent: r.time_spent,
+          avg_time_spent_per_update: r.avg,
+          ...extra(r.extra),
+        };
+      });
+    } else if (table.find('a[href*="/conversation/"]').length || key === "conversation") {
+      out.time_conversations = rows.map((r) => {
+        const a = r.first.find('a[href*="/conversation/"]').first();
+        return {
+          conversation_id: idFromHref(a.attr("href"), /\/conversation\/(\d+)/),
+          number: plainNumber(squish(a.text()).replace(/^#/, "")),
+          subject: squish(r.first.find("small").first().text()) || null,
+          time_spent: r.time_spent,
+          ...extra(r.extra),
+        };
+      });
+    } else if (table.find('a[href*="/customers/"]').length || key === "customer") {
+      out.time_customers = rows.map((r) => {
+        const a = r.first.find("a").first();
+        return {
+          customer_id: idFromHref(a.attr("href"), CUSTOMER_HREF),
+          name: squish((a.length ? a : r.first).text()),
+          time_spent: r.time_spent,
+          ...extra(r.extra),
+        };
+      });
+    } else {
+      out.other_tables!.push({ key: slug(head[0] ?? "", `table_${i + 1}`), title: head[0] ?? "", headers: head, row_count: rows.length });
+    }
+  });
+}
+
+/**
+ * Parse the `report` HTML fragment of a `POST /reports/ajax` answer (§11.4). Table dispatch depends on the report:
+ * productivity/satisfaction (default) recognise distributions, the users table and the ratings table; conversations
+ * and time tracking have their own tables (§11.4b/c), so a time tracking CONVERSATION table is never read as ratings.
+ */
+export function parseReportHtml(html: string, report: ReportKind = "productivity"): ParsedReport {
   const $ = cheerio.load(`<div id="rpt-root">${html}</div>`);
   const distributions: Record<string, Distribution> = {};
   let users: ReportUserRow[] | null = null;
   let ratings: RatingRow[] | null = null;
+  const typeSel = $("select#rpt-chart-type");
+  const groupBy = $("#rpt-group-by");
+  const chart_options: ChartOptions | null =
+    typeSel.length || groupBy.length
+      ? {
+          selected_type: typeSel.find("option[selected]").first().attr("value") ?? null,
+          types: typeSel
+            .find("option[value]")
+            .map((_, o) => ({ value: $(o).attr("value") ?? "", label: squish($(o).text()) }))
+            .get()
+            .filter((o) => o.value),
+          group_bys: groupBy.find("button[value]").map((_, b) => $(b).attr("value") ?? "").get().filter(Boolean),
+          active_group_by: groupBy.find("button.active[value]").first().attr("value") ?? null,
+        }
+      : null;
+  const out: ParsedReport = { metrics: parseMetrics($), distributions, users, ratings, chart_options };
+  if (report === "conversations") {
+    parseConversationsTables($, out);
+    return out;
+  }
+  if (report === "time") {
+    parseTimeTables($, out);
+    return out;
+  }
   $("#rpt-tables table").each((i, el) => {
     const table = $(el);
     const head = headers($, table);
@@ -292,17 +537,9 @@ export function parseReportHtml(html: string): ParsedReport {
       users = parseUsers($, table, head);
     }
   });
-  const typeSel = $("select#rpt-chart-type");
-  const groupBy = $("#rpt-group-by");
-  const chart_options =
-    typeSel.length || groupBy.length
-      ? {
-          selected_type: typeSel.find("option[selected]").first().attr("value") ?? null,
-          group_bys: groupBy.find("button[value]").map((_, b) => $(b).attr("value") ?? "").get().filter(Boolean),
-          active_group_by: groupBy.find("button.active[value]").first().attr("value") ?? null,
-        }
-      : null;
-  return { metrics: parseMetrics($), distributions, users, ratings, chart_options };
+  out.users = users;
+  out.ratings = ratings;
+  return out;
 }
 
 export interface ReportFilterOption {
