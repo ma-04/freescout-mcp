@@ -48,3 +48,19 @@ export function selectedAssigned($: CheerioAPI): string | null {
   const value = (opt.attr("value") ?? "").trim();
   return value === "" ? null : value;
 }
+
+/**
+ * Filter names the search page offers (`data-filter` on the sidebar filter menu `ul.sidebar-menu` and on the form
+ * groups in `#search-filters`, from FreeScout's `search.filters_list`, which modules extend: the Tags module adds
+ * "tag"). Other `[data-filter]` elements on the page are ignored. Null when neither container has filter markup.
+ * FreeScout silently ignores an `f[...]` key it has no handler for, so a filter sent to an install without its
+ * handler returns unfiltered results; callers compare against this list.
+ */
+export function offeredFilters($: CheerioAPI): string[] | null {
+  const names = new Set<string>();
+  $("ul.sidebar-menu [data-filter], #search-filters [data-filter]").each((_, el) => {
+    const v = squish($(el).attr("data-filter"));
+    if (v) names.add(v);
+  });
+  return names.size ? [...names] : null;
+}

@@ -3,7 +3,7 @@ import { log } from "./log.js";
 
 export { parseForwardAllow, recipientAllowed } from "./forward-allow.js";
 
-/** Default pause between consecutive ticket_volume requests (FREESCOUT_STATS_DELAY_MS overrides; 0 = none). */
+/** Default pause between consecutive ticket_volume and agent_stats requests (FREESCOUT_STATS_DELAY_MS overrides; 0 = none). */
 export const DEFAULT_STATS_DELAY_MS = 200;
 
 const LOOPBACK = /^(localhost|127\.0\.0\.1|\[::1\])$/i;
@@ -17,7 +17,7 @@ export interface BaseConfig {
    * registered. Always from the server's environment; never from a request header.
    */
   forwardAllow: string[];
-  /** FREESCOUT_STATS_DELAY_MS: pause between consecutive ticket_volume requests (default 200, 0 allowed). */
+  /** FREESCOUT_STATS_DELAY_MS: pause between consecutive ticket_volume and agent_stats requests (default 200, 0 allowed). */
   statsDelayMs: number;
 }
 

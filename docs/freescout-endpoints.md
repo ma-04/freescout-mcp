@@ -153,7 +153,34 @@ Conversation table (`resources/views/conversations/conversations_table.blade.php
 - `i.conv-star` has `glyphicon-star` (starred by me) or `glyphicon-star-empty`.
 - `i.glyphicon-paperclip` in `td.conv-attachment` → has attachments.
 - `td.conv-subject a` (`href` = `/conversation/{id}?folder_id={fid}`) → first `p` = subject (may start with badges),
-  `p.conv-preview` = preview text.
+  `p.conv-preview` = preview text. With the Tags module the subject `p` also holds
+  `<span class="conv-tags"><span class="tag tag-c-N" data-tag-url="…/search?f%5Btag%5D=<name>">name</span> …</span>&nbsp;Subject`
+  (production, 2026-10-31; fixture `search-results-tags.html`: the markup structure, with every value synthetic). The parser reads the chips into `tags`
+  (display order, deduplicated case-insensitively, first spelling kept) and removes them before reading `subject`; lock/ban badges are still read first.
+- Production (2026-10-31) differs from the demo in two more places: `td.conv-customer a` has the customer name as its
+  own text (no `.conv-customer-name` span; the parser falls back to the link's text nodes), and a browser-rendered
+  DOM has `title=""` on `td.conv-date a` with the tooltip in `data-original-title` (empty attributes fall through to
+  `aria-description`/`data-original-title`). The tooltip date is `User::dateFormat`: the **viewing user's** timezone
+  and time format (`Oct 31, 2026 05:27pm` with the 12-hour setting), not the server's.
+- Lists spanning mailboxes (search results; production 2026-10-31) start `p.conv-preview` with `[Mailbox name]<br>`;
+  FreeScout marks such tables `data-param_show_mailbox="1"` (class `show-mailbox`), while folder and customer tables
+  have no such attribute and single-mailbox searches render it empty. Only on a marked table does the parser move the
+  prefix to `mailbox_name` and strip it from `preview`; elsewhere (folder lists, the demo fixtures) `mailbox_name` is
+  null and a preview that happens to start with `[Text]<br>` is left as is. The row carries no mailbox id, so none is
+  guessed.
+- **Waiting since** (1.8.248 source, demo container): the `td.conv-date` text is `User::dateDiffForHumans()` of the
+  folder's waiting field (`last_reply_at` for Unassigned/Mine/Assigned): `Just now` (≤ 60 s), Carbon's `N min ago`,
+  `N hours ago`, `N days ago`, `1 week ago` (diffInDays ≤ 7), else only the date (`Oct 12`, or `Oct 12, 2025`) in
+  the viewing user's timezone. Folder order for these three folders is `status asc, last_reply_at desc`; the query
+  `sorting[sort_by]=date&sorting[order]=asc` (`Conversation::getConvTableSorting()`, read from the request on a plain
+  GET) drops the status key and sorts `last_reply_at asc`, and the table echoes it in `data-sorting_order`.
+  `waiting_conversations` (`src/waiting.ts`) uses that order (not live-verified), turns the label into hour bounds,
+  keeps active rows whose tooltip says `… by Customer`, and stops paging once a page's newest row is under the
+  threshold. The order is checked on every page: the table must echo `data-sorting_order="asc"` and no row may be
+  certainly older than the row before it (its lower bound above the previous upper bound, across page breaks too).
+  Either failure sets `sorted_oldest_first: false` for that folder, disables the early stop and adds a note. The labels
+  are English only (`dateDiffForHumans` is translated); rows whose label or `Last reply by` tooltip cannot be read are
+  counted in `unreadable_age` and reported in the note rather than dropped silently.
 - `td.conv-number a` → `#<number>` (number, not id; equal in this demo but don't assume).
 - `td.conv-date a` → relative text; `title`/`aria-description` = `Last reply by Customer|User<br/>Oct 22, 2026 06:42`
   (not present in Closed/Drafts/Deleted folders).
@@ -487,7 +514,8 @@ The Tags module (https://freescout.net/module/tags/, paid, no public repository)
 Everything below was read from a production FreeScout that runs it: its minified `/js/builds/*.js` bundle (the
 module's laroute entry and its `addTag()` / remove / select2 code, sent through core `fsAjax`) and its conversation
 page markup. Only GET requests and the read-only `autocomplete` action were
-made there while building this. No production content is reproduced here or in the repo; fixtures are synthetic.
+made there while building this. No production content is reproduced here or in the repo: fixtures are either synthetic or scrubbed captures whose
+values (names, subjects, previews, tags, ids, totals) are all synthetic.
 
 Earlier second-hand evidence (altmenorg/freescout-refresh v1.8.0, commit `0dd1ce4`, `RefreshServiceProvider.php`
 2379-2417) matches what the bundle shows.
@@ -564,8 +592,18 @@ Source: `app/Conversation.php` (`$search_filters` line 176, `search()` line 2549
 | `type` | `f[type]=N` | 1 email, 2 phone, 3 chat |
 | `attachments` | `yes`/`no` | `has_attachments` |
 | `subject`, `body` | text | `LIKE %…%` (case-insensitive) on subject / thread body |
-| `number`, `id` | integer | exact |
-| `following` | `yes` | conversations the user follows |
+| `number`, `id` | integer | exact (`conversations.number` / `conversations.id`; source line ~2647/2658) |
+| `following` | `yes` | inner join `followers` on the current user (select has only `""` and `yes`) |
+| `tag` | `f[tag]=<tag name>` | **Tags module**, not core: absent from the demo (no module), so not verified there. Production (2026-10-31): every tag chip links to exactly `/search?f%5Btag%5D=<name>` and the filter menu lists `tag` |
+| `attachment name` | `f[attachment name]=<text>` | **module filter** seen in production's filter menu (`data-filter="attachment name"`) 2026-10-31; not in 1.8.248 core, no form markup captured, matching rules unknown. The key contains a space: the search form is a plain GET `<form>`, so a browser sends `f%5Battachment+name%5D=…` (urlencoded, space as `+`), which is exactly what `URLSearchParams` produces; PHP keeps spaces inside `[...]` keys. Assumed, not observed on the wire |
+
+- **Unknown `f[...]` keys are silently ignored**: `getSearchFilters()` passes every `f[]` key through and
+  `Conversation::search()` only handles the core names (plus what modules add via `Eventy` hooks). A module filter
+  sent to an install without the module therefore returns **unfiltered** results (and still disables the number
+  redirect). The page's filter menu (`[data-filter]`, from `search.filters_list`) shows what the install offers:
+  the demo lists the 14 core names plus `company`; installs with the Tags, Attachments or CRM modules add filters such
+  as `tag`, `attachment name` or custom-field entries. Only the sidebar filter menu (`ul.sidebar-menu`) and the
+  filter form (`#search-filters`) are read; other `[data-filter]` elements on the page do not count.
 
 - **Dates**: parsed server-side with `strtotime` then `date('Y-m-d')`. Any unparsable value (e.g. `notadate`) becomes
   `1970-01-01` and matches everything, silently. US `10/26/2026` is accepted. The MCP therefore validates
@@ -634,7 +672,21 @@ Paid module, NOT on the demo. Protocol captured 2026-10-28 from a real install's
   are included unless `state` is given).
 - **Number search**: when `q` matches `^#?\d+$` and any filter or `mailbox_id` is present, `q` is NOT sent;
   `f[number]=N` is sent instead (after the other filters) and the result notes "searched by conversation number".
-  Without filters `q=#N` is kept and the single-match redirect branch handles the 302.
+  Without filters `q=#N` is kept and the single-match redirect branch handles the 302. The explicit `number` option
+  (2026-10-31) is the same `f[number]`, always last before `page`; a numeric `q` next to it is folded into it (same
+  number) or refused (different number), so `q=#N` is never sent with a filter.
+- **Parity filters (2026-10-31)**: `tag` → `f[tag]` (trimmed, 1..100), `following: true` → `f[following]=yes` (false is
+  refused: there is no "not following" filter), `id` → `f[id]`, `attachment_name` → `f[attachment name]` (1..200).
+  Each counts as a filter for the "q or a filter" guard. Wire order: … `subject`, `body`, `tag`, `following`, `id`,
+  `attachment name`, `number`, `page`; the earlier keys and `ticket_volume`'s requests are unchanged. For the module
+  filters (`tag`, `attachment_name`) and the core `following`, `id`, `number` (the newest entries of 1.8.248's
+  `Conversation::$search_filters`; the demo and the fake offer them) the result page's filter list is checked:
+  missing → `unsupported_filters` plus a note that the results are NOT narrowed by it; no list on the page →
+  `unverified_filters`. The other core filters are trusted (all in 1.8.248's list); `assigned` and `mailbox` are
+  verified from their dropdowns. Numbers and ids must be safe integers (≤ 2^53 − 1): a larger `number`/`id`, or a
+  larger numeric `q` that would become `f[number]`, is refused instead of being rounded; a long numeric `q` alone is
+  sent verbatim as text. CRM `#…` filters
+  and `mode=customers` are not exposed (no data to verify; customers mode is a different table).
 - **Page check**: after every search GET (search_conversations, list_assignees, ticket_volume) the final URL path must
   end in `/search` (any base sub-path is fine) and the page must contain `table.table-conversations` or
   `.empty-content`; anything else throws `FreeScoutError("unexpected page …")`, never a count of 0.
@@ -683,7 +735,7 @@ The raw captures were deleted after scrubbing; only the scrubbed fixtures remain
 ### 11.1 Routes
 | Route | Notes |
 |---|---|
-| `GET /reports/conversations`, `/reports/productivity`, `/reports/satisfaction`, `/reports/time-tracking` | Report pages. Each renders `form#rpt-filters` and `div#rpt-report[data-report-name=<name>]` (satisfaction also `data-chart-type="pie"`), plus the inline `initReports()`. The page itself contains no numbers: the JS immediately POSTs the ajax below. Nav links to all four pages are in the page |
+| `GET /reports/conversations`, `/reports/productivity`, `/reports/satisfaction`, `/reports/time-tracking` | Report pages. Each renders `form#rpt-filters` and `div#rpt-report[data-report-name=<name>]` (satisfaction also `data-chart-type="pie"`, time tracking `data-chart-type="column"`), plus the inline `initReports()`. The page itself contains no numbers: the JS immediately POSTs the ajax below. Nav links to all four pages are in the page. **Wire names** (`data-report-name` = `report_name`): `productivity`, `satisfaction`, `conversations` and **`time`** for the page slug `time-tracking` (verified 2026-10-31); the MCP maps slug ↔ wire name in its availability check |
 | `POST /reports/ajax` (laroute name `reports.ajax`) | Sent by `fsAjax`, i.e. the same conventions as `POST /conversation/ajax` (§3: `X-CSRF-TOKEN` header from `<meta name="csrf-token">`, `X-Requested-With: XMLHttpRequest`, urlencoded body, JSON answer). Read-only: it only computes a report |
 
 Not verified: what a non-admin without report permission gets (403, redirect, or the module's own message). The MCP
@@ -695,7 +747,7 @@ opened is a tool error, also never zeros. A `404` on `GET /reports/productivity`
 ### 11.2 Request body (urlencoded; exactly what `rptRefresh()` serialises)
 ```
 action=report
-report_name=productivity | satisfaction           (from #rpt-report[data-report-name])
+report_name=productivity | satisfaction | conversations | time   (from #rpt-report[data-report-name])
 filters[type]=                                     '' | 1 email | 2 phone | 3 chat
 filters[mailbox]=15                                '' = all mailboxes the user can see
 filters[user]=50                                   OMITTED entirely when no user is selected ("All Users")
@@ -720,6 +772,17 @@ Observed bodies (verbatim, decoded):
 5. satisfaction, mailbox 15, 2026-10-01..28:
    `action=report&report_name=satisfaction&filters[type]=&filters[mailbox]=15&filters[tag]=&filters[period]=custom&filters[from]=2026-10-01&filters[to]=2026-10-28`
    (no chart keys ever: the satisfaction report has no chart options).
+6. (2026-10-31) conversations and time tracking, all mailboxes, 2026-10-24..31 (browser, CSRF in the header):
+   `action=report&report_name=conversations&filters[type]=&filters[mailbox]=&filters[tag]=&filters[period]=custom&filters[from]=2026-10-24&filters[to]=2026-10-31`
+   and the same with `report_name=time`. Their forms have no `user` select, and no chart keys were sent.
+7. (2026-10-31) productivity after the chart rendered, nothing selected:
+   `…&filters[mailbox]=&filters[user]=&filters[tag]=&filters[period]=custom&filters[from]=…&filters[to]=…&chart[group_by]=d&chart[type]=customers_helped`
+   (the UI sends `filters[user]=` empty here; body 4 had no `user` key at all). The MCP sends the body-4 filter shape
+   (no `user` key for all users) and, since the 2026-10-31 review, **always** the two chart keys of this body
+   (`chart[group_by]=d&chart[type]=<metric>`, also for the default `customers_helped`): without them FreeScout picks
+   the series granularity itself (a 12-month request without chart keys answered with a 365-point day series, but that
+   is FreeScout's choice). The metric cards and tables do not depend on the chart keys; the 2026-10-31 live comparisons
+   with the page matched.
 The URL query (`?period=&from=&to=&user=&mailbox=&type=&tag=`) only pre-fills the form (`rptUpdateFromUrl`).
 
 ### 11.3 Response
@@ -731,8 +794,18 @@ captured). Productivity `chart`: `{type, group_bys:["d","w","m"], group_by, labe
 data:[...]}, {label:"Previous", data:[...]}]}`. `group_bys` lists what the range allows: 10 and 28 days → `["d"]`
 / `["d","w"]`, 12 months → `["d","w","m"]`. `labels` are display strings in the user's locale: `"Oct 21"` for
 days, `"Oct 2, 2025" … "Mar 30, 2026"` for months (FreeScout's own month boundaries are not the 1st; pass labels
-through unchanged, never re-derive dates from them). `Previous` is FreeScout's previous period, **inferred** (not
-verified) to be the same-length period right before `from`; the MCP says so in every result.
+through unchanged, never re-derive dates from them). `Previous` is FreeScout's previous period. **Verified
+2026-10-31** (replies day series of consecutive ranges): it is the range shifted back by `to - from` days, i.e. N-1
+days for an N-day range, so it **overlaps `from` by one day**: Oct 19–25 previous = the day points of Oct 13..19,
+Oct 12–18 previous = Oct 6..12, Oct 1–31 previous = Sep 1..Oct 1. For a single-day range the previous period is the
+same day, so every `change_percent` is 0%. The MCP states this rule in every result's note.
+**Week/month series (2026-10-31):** FreeScout's `w` series is not a set of weekly totals: for 2026-10-01..31
+(`replies`) the day series summed to 437 (= Replies Sent) while the week series was labels `Oct 3, 10, 17, 24, 31`
+(Saturdays: Sunday–Saturday weeks labelled by their end) with data `[9,11,13,9,2]` (sum 44). The MCP therefore never
+requests `w`/`m`; it requests `d` and sums weeks/months itself (§11.4a, "What the MCP does").
+Conversations `chart`: `{type:"new_conv", group_bys:["d"], group_by:"d", labels:["Oct 24",…], datasets:[{label:"Current",
+data}, {label:"Previous", data}]}` (8 points for 8 days; the day points sum to New Conversations). Time tracking
+`chart`: `{y_title:"Hours", labels:[user names], datasets:[{data:[hours per user]}]}` (a bar chart, no dates).
 Satisfaction `chart`: `{labels:["Good","Okay","Not Good"], datasets:[{data:[50,0,50], backgroundColor:[...]}]}`
 — percentages, no `type`/`group_by`.
 
@@ -774,13 +847,44 @@ grouping the chart `data` carried single-day-sized values (week series `[6,8,10,
 unchanged (the raw browser capture `reports-productivity-ajax-by-month.json` has the same numbers), so this is
 FreeScout's chart, not our parsing. Use `d` and sum client-side for per-period totals.
 
+**2026-10-31 (hosted MCP vs the Reports page in Chrome, read-only):** single days and whole weeks matched exactly,
+cards and per-user tables (Oct 28: 37 customers helped / 52 replies / 38 closed; Oct 30: 10/10/16; week Oct 19–25:
+74/101/111; week Oct 12–18: 71/126/111). The Day chart point for a date equals that day's Replies Sent, and
+`ticket_volume` for Oct 24–31 (122) equals the Conversations report's New Conversations.
+
+### 11.4b Conversations report fragment (fixture: `reports-conversations-ajax.json`, 2026-10-24..31)
+Metrics (same markup as 11.4, all with tooltips): Total Conversations 252 `+33%`, New Conversations 122 `-20%`,
+Messages Received 147 `-16%`, Customers 76 `-17%`, Conversations per Day 15 `-20%`, **Busiest Day** `Friday` (a
+weekday name, no change span: the MCP returns `value: null`, `raw_value: "Friday"`). Chart options: `select#rpt-chart-type`
+with `new_conv` (New Conversations, selected) and `messages` (Messages Received); `#rpt-group-by` with only `d` (Day)
+for an 8-day range. `#rpt-tables`: `Most Active Customers | #` (rows `<a href="…/customers/<id>/edit">name</a> | count`;
+20 rows observed; names are customer-controlled, one was an email address) and `Tags | #` (rows
+`<a href="…/search?f%5Btag%5D=<name>">name</a> | count`; no tag id in the markup).
+
+### 11.4c Time tracking report fragment (fixture: `reports-time-tracking-ajax.json`, 2026-10-24..31)
+Metrics (title and value `text-center`, no tooltips): Total Hours Spent 76.7 `+78%`, Avg. Hours Spent per Update 0.6
+`+60%`. `#rpt-chart-container` has only the canvas (no options). `#rpt-tables`:
+- `User | Time Spent | Avg. Time Spent per Update`: the user is `<a href="…/users/profile/<id>">name</a>` (**not**
+  `button.rpt-user-btn`);
+- `Conversation | Time Spent`: `<a href="…/conversation/<id>">#<number></a> <small class="text-help">subject</small>`
+  (this table has conversation links, so the productivity/satisfaction dispatch would read it as ratings; the parser
+  dispatches by report name);
+- `Customer | Time Spent`: `<a href="…/customers/<id>/edit">name</a>`.
+Times are English display strings: `4 minutes`, `1 hour 10 minutes`, `2 days 22 hours 37 minutes`. The MCP returns
+`{raw, minutes}` (whole minutes; `null` when the whole text is not `<integer><optional spaces><unit>` pairs, unit
+case-insensitive, one of `day(s)`/`d`, `hour(s)`/`h`, `minute(s)`/`min`/`mins`/`m`, `second(s)`/`sec`/`secs`/`s`;
+seconds round to the nearest minute; decimals and other words give `null`). 20 rows
+were observed in the conversation and customer tables; whether FreeScout caps them is not verified.
+
 ### 11.5 Page `form#rpt-filters` (fixture: `reports-productivity-page.html`)
 Selects `type`, `mailbox` (the user's visible mailboxes), `user` (every option has `data-mailboxes="15,21,…"`;
 options whose mailboxes do not include the selected mailbox are `disabled` **client-side only**; the first option
 `All Users` is `disabled` with value `""`, which is why `filters[user]` is omitted), `tag` (every tag, thousands on
 a big install), `period`, inputs `from`/`to` (flatpickr, `YYYY-MM-DD`). `body[data-auth_user_id]` holds the current
 user id. The MCP uses this form for: module/permission detection, the list of users (`id`, name, mailboxes) and
-mailboxes available to reports, and the CSRF token.
+mailboxes available to reports, and the CSRF token. The conversations and time tracking forms (2026-10-31) are the
+same without the `user` select (`type, mailbox, tag, period, from, to`; only the `.rpt-title` differs between them);
+the fake FreeScout derives them from the productivity fixture.
 
 ### 11.6 Cost and limits (observed)
 A 12-month day-grouped productivity report took several seconds server-side; a 10-day one was quick. Every ajax
@@ -806,10 +910,10 @@ Code: `src/reports.ts` (flow, guard), `src/parsers/reports.ts` (fragment and fil
   of 11.2, `_token` appended like every ajax POST. The form is built and checked by
   `assertReportForm` right before the POST: exactly `action=report`, `report_name` productivity|satisfaction,
   `filters` = `type` (`''|1|2|3`), `mailbox` (`''` or positive int), `user` (positive int, key **absent** for all
-  users), `tag` (`''` or positive int), `period=custom`, `from`, `to` (as above); `chart` = `group_by` d|w|m and
-  `type` customers_helped|replies|closed, productivity only, and sent only for a non-default chart: the default
-  request (customers_helped by d) carries no chart keys, byte-identical to bodies 1 and 4. Any other key, value or
-  type throws before the request.
+  users), `tag` (`''` or positive int), `period=custom`, `from`, `to` (as above); `chart` = `group_by` and
+  `type` customers_helped|replies|closed, productivity only (`group_by` pinned to `d` since 2026-10-31, see below).
+  Since the 2026-10-31 review the MCP always sends both chart keys on productivity requests (body 7's shape), never
+  relying on FreeScout's default chart. Any other key, value or type throws before the request.
 - **Answer**: `checkAjax` (status must be `success`; a permission `msg` is a `PermissionError`), `report` must be a
   non-empty HTML string with at least one `.rpt-metric`, otherwise a tool error; a non-JSON answer is a tool error; an
   HTTP 403 on the POST is a tool error worded as a Reports permission (not a mailbox one). Metrics: `key` = slug of the title,
@@ -831,3 +935,51 @@ Code: `src/reports.ts` (flow, guard), `src/parsers/reports.ts` (fragment and fil
 - **Caps**: one GET and one report request per call, no fan-out, no pacing pause between them; satisfaction returns at most
   500 rated conversations (`ratings_total`, `ratings_truncated`). Customer names and comments only with
   `include_comments: true`, with an untrusted-content notice. `list_report_users` is the GET only.
+
+### Changes 2026-10-31 (Phase C items 2 and 3)
+- **Guard**: `report_name` productivity | satisfaction | conversations | time, with an exact filter whitelist per
+  report: `user` (optional) only for productivity and satisfaction; conversations and time take exactly `type,
+  mailbox, tag, period, from, to`; `chart` only for productivity and `chart[group_by]` pinned to `d`. The page slug
+  `time-tracking` is not a wire name and is refused. Still one `/reports/ajax` literal and one call site.
+- **Availability**: `GET /reports/<slug>` (`time` → `/reports/time-tracking`), final path compared with the slug,
+  `#rpt-report[data-report-name]` compared with the wire name.
+- **Parser dispatch is report-aware** (`parseReportHtml(html, report_name)`): conversations → `most_active_customers`,
+  `tags`; time → `time_users`, `time_conversations`, `time_customers`; unrecognised tables of those two reports are
+  reported by shape only (`other_tables`: title, headers, row count; never cells). Productivity/satisfaction unchanged.
+- **`productivity_report` week/month**: the day series is requested explicitly (`chart[group_by]=d` and
+  `chart[type]` on every productivity request), `chart` stays that day series, and `chart.periods` lists `{start, end, value, previous_start, previous_end,
+  previous_value}` per ISO week (or Sunday–Saturday with `week_start: "sunday"`) / calendar month, clipped to
+  `from..to`. Dates come from `from` + index only; the series must have exactly one point per day of the range,
+  otherwise `periods` is `null` with a warning (a different wording when only the metric differs: see `mismatch`). `previous_value` sums the previous series at the same positions, dated
+  `previous_start..previous_end` = the bucket shifted back by `to - from` days (the verified previous-period rule). A
+  bucket containing a `null` point is `null`.
+- **`conversations_report` / `time_tracking_report`**: `from`, `to`, `mailbox_id?`, `type?`, `tag_id?` (`user_id` is
+  refused before any request), `include_names` (default false). Without it, customer names and conversation subjects
+  are omitted (ids, counts, times stay) and `content_notice` says so; with it they are labelled untrusted. The cells
+  of unrecognised time-table columns (`extra_columns`, possibly customer-written) are omitted too unless
+  `include_names` is true (the note says columns were omitted). Conversations-report rows have no `extra_columns`. Agent names
+  (users table, time chart) and tag names are always returned, as in `productivity_report`.
+
+### 11.7 `agent_stats` (Phase C item 1)
+Per-period productivity: `from`, `to`, `period` day|week|month, `week_start` monday (ISO, default) | sunday,
+optional `mailbox_id`, `user_id`, `type`, `tag_id`.
+- **Before any request**: strict dates, `from <= to`, buckets built like `ticket_volume`'s (days; weeks starting on
+  `week_start`; calendar months; first and last clipped to `from..to`), at most **31 buckets** (error otherwise), and
+  every bucket's form built and checked by `assertReportForm`.
+- **Requests**: one `GET /reports/productivity` (availability, CSRF, filter warnings; once, not per bucket), then one
+  productivity report request per bucket through the same guarded call site, the productivity body of
+  `productivity_report` (`chart[group_by]=d&chart[type]=customers_helped`, chart unused; no `user` key unless
+  `user_id`), **serial**, with `FREESCOUT_STATS_DELAY_MS` (default 200 ms) between consecutive
+  report requests. Each request recomputes the report server-side (§11.6), so the cap and pause matter.
+- **Result**: `buckets[] = {start, end, metrics, users}` (metrics and users table parsed exactly as in
+  `productivity_report`; `users` is `[]`, never `null`, when the bucket's report has no users table, e.g. a day
+  nobody worked yet: observed live 2026-10-31, with a note); `totals` = sums over the buckets of `replies_sent`,
+  `closed`, `resolved_on_first_reply` (a field is `null` when any bucket lacks a plain number); `customers_helped`
+  (a distinct-customer count that a sum would double-count across buckets), `replies_per_day` and satisfaction
+  scores are per bucket only; `user_totals` = per user id sums of replies sent and closed over the buckets whose table
+  lists them (+ `buckets` count); `requests_made` (report requests). A failure mid-run returns the finished buckets
+  (with their data) with `incomplete: true`, a redacted `error`, and `totals: null`, `user_totals: null` (a partial
+  sum is not the range's total). A dead session (`AuthError`) or a report permission refusal (403) is rethrown as a
+  tool error, not an incomplete success. Module/permission missing → the same `{available:false, reason}` shape as the report tools, no POST.
+- **Why per-bucket reports**: on 2026-10-31 single-day and whole-week reports matched the Reports page exactly
+  (§11.4a), while FreeScout's week chart series did not (§11.3).

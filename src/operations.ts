@@ -21,7 +21,7 @@ import {
   type MailboxSidebar,
   type MailboxSummary,
 } from "./parsers/mailbox.js";
-import { parseSearchFilters, selectedAssigned, type FilterOption } from "./parsers/search-filters.js";
+import { offeredFilters, parseSearchFilters, selectedAssigned, type FilterOption } from "./parsers/search-filters.js";
 import { htmlToText, squish } from "./parsers/text.js";
 
 const AJAX = "/conversation/ajax";
@@ -168,9 +168,25 @@ export interface SearchFilters {
   has_attachments?: boolean;
   subject?: string;
   body?: string;
-  /** Exact conversation number: sent as f[number] when q is "#N" (or "N") together with a filter (see buildSearchParams). */
+  /** Exact tag name (Tags module; `f[tag]`, the same URL a tag chip links to). */
+  tag?: string;
+  /** Only conversations the current user follows (`f[following]=yes`). There is no "not following" filter. */
+  following?: true;
+  /** Exact conversation number (`f[number]`). Also set when q is "#N" (or "N") together with a filter (see buildSearchParams). */
   number?: number;
+  /** Exact conversation id (`f[id]`). */
+  id?: number;
+  /** Attachment file name (`f[attachment name]`, a module filter seen on production; matching rules not verified). */
+  attachment_name?: string;
 }
+
+export const TAG_MAX = 100;
+export const ATTACHMENT_NAME_MAX = 200;
+/** Filter names accepted by search_conversations, in the order of the "give q or a filter" error. */
+export const SEARCH_FILTER_NAMES = [
+  "assigned", "status", "state", "after", "before", "customer_id", "type", "has_attachments", "subject", "body",
+  "tag", "following", "number", "id", "attachment_name",
+] as const;
 
 export interface SearchOptions extends SearchFilters {
   q?: string;
@@ -190,8 +206,31 @@ export interface SearchResult extends ConversationTable {
   mailbox_filter_ignored?: boolean | null;
   /** The assigned filter FreeScout applied when it differs from the requested one (agents limited to their own conversations). */
   assigned_filter_forced?: AssignedArg;
+  /**
+   * Filters (the module filters tag, attachment_name, and the core following, id, number) that were sent but that
+   * this install's search page does not offer: FreeScout ignored them, so the results are NOT narrowed by them.
+   * Absent when every sent checked filter is offered.
+   */
+  unsupported_filters?: string[];
+  /** Checked filters that were sent but could not be verified (the page had no filter markup). */
+  unverified_filters?: string[];
   note?: string;
 }
+
+/**
+ * Search filters checked against the page's filter list (option name -> FreeScout's data-filter name, module filter?).
+ * tag and attachment_name come from modules. following, id and number are core in 1.8.248 (the version whose source
+ * was read) but are the newest entries of its filter list, so they are checked too: an install whose search lacks
+ * them would ignore them just as silently. The other core filters are trusted (in Conversation::$search_filters of
+ * 1.8.248); assigned and mailbox are additionally verified from their dropdowns.
+ */
+const CHECKED_FILTERS = [
+  ["tag", "tag", true],
+  ["attachment_name", "attachment name", true],
+  ["following", "following", false],
+  ["id", "id", false],
+  ["number", "number", false],
+] as const;
 
 export const MAILBOX_IGNORED_NOTE =
   "FreeScout ignored mailbox_id (this account cannot view that mailbox) and searched all mailboxes it can view.";
@@ -202,7 +241,8 @@ export const assignedForcedNote = (forced: AssignedArg): string =>
   `FreeScout applied assigned=${JSON.stringify(forced)} instead of the requested assignee filter (this account may ` +
   "only see conversations assigned to it), so these results are limited to that assignee.";
 
-const isPosInt = (n: unknown): n is number => typeof n === "number" && Number.isInteger(n) && n > 0;
+/** Positive integer that survives a round trip through a JS number (ids above 2^53 - 1 would be silently rounded). */
+const isPosInt = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n > 0;
 
 /**
  * Validate the filters and build the `/search` query string. Throws (before any request) on a bad value, on
@@ -276,21 +316,65 @@ export function buildSearchParams(opts: SearchOptions): {
     params.set(`f[${k}]`, v.trim());
     filters[k] = v.trim();
   }
-  if (!query && Object.keys(filters).length === 0) {
+  if (opts.tag !== undefined) {
+    if (typeof opts.tag !== "string" || !opts.tag.trim() || opts.tag.trim().length > TAG_MAX) {
+      throw new Error(`tag must be a tag name (1..${TAG_MAX} characters)`);
+    }
+    params.set("f[tag]", opts.tag.trim());
+    filters.tag = opts.tag.trim();
+  }
+  if (opts.following !== undefined) {
+    // FreeScout's select has only "yes"; anything else is not a filter at all, so refuse rather than ignore it.
+    if (opts.following !== true) throw new Error("following must be true (there is no 'not following' filter); omit it otherwise");
+    params.set("f[following]", "yes");
+    filters.following = true;
+  }
+  if (opts.id !== undefined) {
+    if (!isPosInt(opts.id)) throw new Error("id must be a positive integer (conversation id)");
+    params.set("f[id]", String(opts.id));
+    filters.id = opts.id;
+  }
+  if (opts.attachment_name !== undefined) {
+    const v = opts.attachment_name;
+    if (typeof v !== "string" || !v.trim() || v.trim().length > ATTACHMENT_NAME_MAX) {
+      throw new Error(`attachment_name must be text (1..${ATTACHMENT_NAME_MAX} characters)`);
+    }
+    // The key has a space; URLSearchParams sends f%5Battachment+name%5D, as a browser GET form submit does.
+    params.set("f[attachment name]", v.trim());
+    filters.attachment_name = v.trim();
+  }
+  if (opts.number !== undefined && !isPosInt(opts.number)) {
+    throw new Error(`number must be a positive integer up to ${Number.MAX_SAFE_INTEGER} (conversation number)`);
+  }
+  const qNumber = query !== null && /^#?\d+$/.test(query) ? Number(query.replace(/^#/, "")) : null;
+  // Number("12345678901234567890") rounds: never compare or send a rounded conversation number. Alone, such a q is
+  // sent verbatim as text (FreeScout gets the exact string); it is refused only where it would become f[number].
+  if (
+    qNumber !== null &&
+    !Number.isSafeInteger(qNumber) &&
+    (Object.keys(filters).length > 0 || opts.mailbox_id !== undefined || opts.number !== undefined)
+  ) {
+    throw new Error(`q ${JSON.stringify(query)} is too large for a conversation number (max ${Number.MAX_SAFE_INTEGER})`);
+  }
+  if (opts.number !== undefined && qNumber !== null && qNumber !== opts.number) {
+    throw new Error(`q ${JSON.stringify(query)} conflicts with number ${opts.number}; give one conversation number`);
+  }
+  if (!query && Object.keys(filters).length === 0 && opts.number === undefined) {
     throw new Error(
-      "Give q or at least one filter (assigned, status, state, after, before, customer_id, type, has_attachments, " +
-        "subject, body). An empty search would list every conversation.",
+      `Give q or at least one filter (${SEARCH_FILTER_NAMES.join(", ")}). An empty search would list every conversation.`,
     );
   }
   // q "#N" (or "N") together with any filter, mailbox_id included, makes FreeScout 1.8 answer HTTP 500 (its number
   // shortcut skips the filtered query and the view then paginates a plain array, §10.1). Send FreeScout's exact
   // f[number] filter instead of q. Without filters q is kept: FreeScout redirects to the conversation.
-  const byNumber = query !== null && /^#?\d+$/.test(query) && (Object.keys(filters).length > 0 || opts.mailbox_id !== undefined);
+  // An explicit number is the same f[number] filter, so a numeric q next to it is folded into it (never sent as q).
+  const byNumber =
+    qNumber !== null && (Object.keys(filters).length > 0 || opts.mailbox_id !== undefined || opts.number !== undefined);
   const out = new URLSearchParams();
   if (query && !byNumber) out.set("q", query);
   for (const [k, v] of params) out.append(k, v);
-  if (byNumber) {
-    const n = Number(query!.replace(/^#/, ""));
+  const n = opts.number ?? (byNumber ? qNumber : null);
+  if (n !== null) {
     if (!isPosInt(n)) throw new Error(`conversation number must be a positive integer (got ${JSON.stringify(query)})`);
     out.set("f[number]", String(n));
     filters.number = n;
@@ -366,12 +450,14 @@ export async function searchConversations(
       subject: c.subject ?? "",
       customer: c.customer ? { name: c.customer.name, email: c.customer.email } : null,
       preview: last ? last.body.slice(0, 200) : null,
+      mailbox_name: c.mailbox_name,
       status: c.status,
       assignee: c.assignee,
       last_activity: c.updated_at ? { relative: null, by: null, at: c.updated_at } : null,
       thread_count: c.threads.filter((t) => t.type === "customer" || t.type === "message").length,
       starred: c.starred,
       has_attachments: c.threads.some((t) => t.attachments.length > 0),
+      tags: conversationTags(html) ?? [],
       url: c.url,
     };
     return {
@@ -405,6 +491,31 @@ export async function searchConversations(
   if (forced !== null) {
     result.assigned_filter_forced = forced;
     notes.push(assignedForcedNote(forced));
+  }
+  const sentChecked = CHECKED_FILTERS.filter(([opt]) => filters[opt] !== undefined);
+  if (sentChecked.length) {
+    const offered = offeredFilters(html.$);
+    if (offered === null) {
+      result.unverified_filters = sentChecked.map(([opt]) => opt);
+      notes.push(
+        `Could not verify that this install supports ${result.unverified_filters.join(", ")} (no filter list on the page); ` +
+          "if it does not, FreeScout ignores the filter and the results are not narrowed by it.",
+      );
+    } else {
+      const missing = sentChecked.filter(([, wire]) => !offered.includes(wire));
+      if (missing.length) {
+        result.unsupported_filters = missing.map(([opt]) => opt);
+        const why = missing.every(([, , mod]) => mod)
+          ? "module not installed"
+          : missing.every(([, , mod]) => !mod)
+            ? "older FreeScout version"
+            : "module not installed or older FreeScout version";
+        notes.push(
+          `This install's search does not offer ${result.unsupported_filters.join(", ")} (${why}), so FreeScout ignored it: ` +
+            "these results are NOT filtered by it.",
+        );
+      }
+    }
   }
   if (notes.length) result.note = notes.join(" ");
   return result;
@@ -524,6 +635,70 @@ export async function getCustomer(port: FreeScoutPort, idOrEmail: number | strin
     conversations: table.conversations.slice(0, limit),
     conversations_total: table.total,
     url: page.url,
+  };
+}
+
+export interface CustomerHistoryItem {
+  id: number;
+  number: number | null;
+  subject: string;
+  status: ConversationRow["status"];
+  assignee: string | null;
+  last_activity: ConversationRow["last_activity"];
+  tags: string[];
+}
+
+export interface CustomerHistory {
+  customer: Omit<CustomerResult, "conversations" | "conversations_total">;
+  conversations: CustomerHistoryItem[];
+  /** Counts over the listed conversations only (see listed / conversations_total). */
+  by_status: Record<"active" | "pending" | "closed" | "spam" | "unknown", number>;
+  listed: number;
+  /** FreeScout's total for this customer in mailboxes this account can view (null if the page had no total). */
+  conversations_total: number | null;
+  complete: boolean;
+  note: string;
+}
+
+export const CUSTOMER_HISTORY_NOTE =
+  "Composed from the customer page (one page, newest first): conversations in mailboxes this account can view. " +
+  "status is inferred from the row (lock badge = closed, active class = active, otherwise pending); by_status counts " +
+  "only the listed rows. last_activity.at is a display string in the viewing user's timezone.";
+
+/** get_customer plus a compact per-conversation list and counts by status (no extra requests). */
+export async function customerHistory(port: FreeScoutPort, idOrEmail: number | string, limit = 50): Promise<CustomerHistory> {
+  const c = await getCustomer(port, idOrEmail, limit);
+  const { conversations: rows, conversations_total, ...customer } = c;
+  const by_status: CustomerHistory["by_status"] = { active: 0, pending: 0, closed: 0, spam: 0, unknown: 0 };
+  for (const r of rows) by_status[r.status ?? "unknown"]++;
+  const complete = conversations_total !== null && rows.length >= conversations_total;
+  let note = CUSTOMER_HISTORY_NOTE;
+  if (conversations_total === null) {
+    note +=
+      rows.length === 0
+        ? " The customer page showed no conversations and no total; there may still be conversations, use " +
+          "search_conversations with customer_id to check."
+        : ` FreeScout's total could not be read, so ${rows.length} conversation(s) are listed and there may be more; ` +
+          "use search_conversations with customer_id for the full list.";
+  } else if (!complete) {
+    note += ` Only ${rows.length} of ${conversations_total} conversations are listed; use search_conversations with customer_id for the rest.`;
+  }
+  return {
+    customer,
+    conversations: rows.map((r) => ({
+      id: r.id,
+      number: r.number,
+      subject: r.subject,
+      status: r.status,
+      assignee: r.assignee,
+      last_activity: r.last_activity,
+      tags: r.tags,
+    })),
+    by_status,
+    listed: rows.length,
+    conversations_total,
+    complete,
+    note,
   };
 }
 

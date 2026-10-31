@@ -71,7 +71,8 @@ describe("report HTML parser on the fixtures", () => {
     expect(p.distributions.response_time!.buckets.find((b) => b.label === "30-60 min")).toMatchObject({ change_percent: 0, raw_change: "0%" });
     expect(p.metrics[1]).toMatchObject({ key: "replies_sent", value: 34, change_percent: -144, change_direction: "down" });
     expect(p.users).toEqual([{ user_id: 50, name: "User 50", replies_sent: 34, closed: 36, customers_helped: 20, satisfaction_score: 0 }]);
-    expect(p.chart_options).toEqual({ selected_type: "customers_helped", group_bys: ["d"], active_group_by: "d" });
+    expect(p.chart_options).toMatchObject({ selected_type: "customers_helped", group_bys: ["d"], active_group_by: "d" });
+    expect(p.chart_options!.types.map((t) => t.value)).toEqual(["customers_helped", "replies", "closed"]);
   });
 
   it("users table ids, names and numbers; chart options of the month fixture", () => {
@@ -81,7 +82,7 @@ describe("report HTML parser on the fixtures", () => {
     ]);
     const m = parseReportHtml(MONTH.report);
     expect(m.users).toEqual([{ user_id: 50, name: "User 50", replies_sent: 1391, closed: 1556, customers_helped: 304, satisfaction_score: 0 }]);
-    expect(m.chart_options).toEqual({ selected_type: "replies", group_bys: ["d", "w", "m"], active_group_by: "m" });
+    expect(m.chart_options).toMatchObject({ selected_type: "replies", group_bys: ["d", "w", "m"], active_group_by: "m" });
     expect(m.metrics.map((x) => x.value)).toEqual([304, 1391, 6, 1556, 163]);
   });
 
@@ -169,10 +170,17 @@ describe("assertReportForm", () => {
     expect(() => buildReportForm("satisfaction", { from: "2026-10-01", to: "2026-10-28", group_by: "week" })).toThrow(/productivity-only/);
   });
 
-  it("I1: the default chart (customers_helped by day) sends no chart keys; any other chart sends both", () => {
-    expect(buildReportForm("productivity", { from: "2026-10-01", to: "2026-10-28" })).not.toHaveProperty("chart");
-    expect(buildReportForm("productivity", { from: "2026-10-01", to: "2026-10-28", chart_metric: "customers_helped", group_by: "day" })).not.toHaveProperty("chart");
-    expect(buildReportForm("productivity", { from: "2026-10-01", to: "2026-10-28", group_by: "month" }).chart).toEqual({ group_by: "m", type: "customers_helped" });
+  it("I1: chart keys are always sent for productivity (day series), even for the default metric", () => {
+    expect(buildReportForm("productivity", { from: "2026-10-01", to: "2026-10-28" }).chart).toEqual({ group_by: "d", type: "customers_helped" });
+    expect(buildReportForm("productivity", { from: "2026-10-01", to: "2026-10-28", chart_metric: "customers_helped", group_by: "day" }).chart).toEqual({ group_by: "d", type: "customers_helped" });
+    // week/month are summed client-side from the DAY series; w/m are never sent, and the day series is asked for explicitly.
+    expect(buildReportForm("productivity", { from: "2026-10-01", to: "2026-10-28", group_by: "month" }).chart).toEqual({ group_by: "d", type: "customers_helped" });
+    expect(buildReportForm("productivity", { from: "2025-11-01", to: "2026-10-31", group_by: "month" }).chart).toEqual({ group_by: "d", type: "customers_helped" });
+    expect(buildReportForm("productivity", { from: "2026-10-01", to: "2026-10-28", group_by: "week", chart_metric: "replies" }).chart).toEqual({ group_by: "d", type: "replies" });
+    expect(() => assertReportForm({ ...okForm(), chart: { group_by: "w", type: "replies" } })).toThrow(/only the day series/);
+    expect(() => assertReportForm({ ...okForm(), chart: { group_by: "m", type: "replies" } })).toThrow(FreeScoutError);
+    expect(() => buildReportForm("productivity", { from: "2026-10-01", to: "2026-10-28", group_by: "week", week_start: "friday" as never })).toThrow(/week_start/);
+    expect(() => buildReportForm("satisfaction", { from: "2026-10-01", to: "2026-10-28", week_start: "sunday" })).toThrow(/productivity-only/);
     expect(buildReportForm("productivity", { from: "2026-10-01", to: "2026-10-28", chart_metric: "closed" }).chart).toEqual({ group_by: "d", type: "closed" });
   });
 
@@ -310,8 +318,8 @@ describe("reports through the real Session against the fake FreeScout", () => {
     const r = await productivityReport(client, { from: "2026-10-01", to: "2026-10-28", mailbox_id: 15 });
     expect(fs!.requests.map((q) => `${q.method} ${q.path}`)).toEqual(["GET /reports/productivity", "POST /reports/ajax"]);
     expect(posted()).toEqual([
-      // I1: the default chart sends no chart keys, exactly like §11.2 bodies 1 and 4.
-      decoded("action=report&report_name=productivity&filters[type]=&filters[mailbox]=15&filters[tag]=&filters[period]=custom&filters[from]=2026-10-01&filters[to]=2026-10-28"),
+      // I1: the default chart still sends both chart keys (day series), like the browser body after a chart pick.
+      decoded("action=report&report_name=productivity&filters[type]=&filters[mailbox]=15&filters[tag]=&filters[period]=custom&filters[from]=2026-10-01&filters[to]=2026-10-28&chart[group_by]=d&chart[type]=customers_helped"),
     ]);
     expect(fs!.reportPosts[0]!.find(([k]) => k === "_token")?.[1]).toBeTruthy();
     expect(r).toMatchObject({
@@ -332,7 +340,9 @@ describe("reports through the real Session against the fake FreeScout", () => {
     expect(r.chart!.labels[0]).toBe("Oct 1");
     expect(r).not.toHaveProperty("mismatch");
     expect(r.note).toMatch(/previous period/);
-    expect(r.note).toMatch(/single-day-sized values/);
+    expect(r.note).toMatch(/never\s+requested/);
+    expect(r.note).toMatch(/overlaps from by one day/);
+    expect(r.chart).not.toHaveProperty("periods");
     expect(r.note).toMatch(/opaque display strings/);
   });
 
@@ -354,20 +364,83 @@ describe("reports through the real Session against the fake FreeScout", () => {
     expect(r.note).toMatch(/MISMATCH/);
   });
 
-  it("week on a range that only allows day is reported as a mismatch", async () => {
+  it("week on a 10-day range: the day series is requested explicitly and summed into clipped ISO weeks", async () => {
     const client = await setup();
     const r = await productivityReport(client, { from: "2026-10-21", to: "2026-10-30", user_id: 50, group_by: "week" });
-    expect(r).toMatchObject({ mismatch: { requested: { group_by: "week" }, received: { group_by: "day", available_group_bys: ["day"] } } });
+    expect(posted()[0]).toEqual(
+      decoded("action=report&report_name=productivity&filters[type]=&filters[mailbox]=&filters[user]=50&filters[tag]=&filters[period]=custom&filters[from]=2026-10-21&filters[to]=2026-10-30&chart[group_by]=d&chart[type]=customers_helped"),
+    );
+    if (!r.available) throw new Error("unavailable");
+    expect(r).not.toHaveProperty("mismatch");
+    expect(r.filters).toMatchObject({ group_by: "week", week_start: "monday" });
+    const c = r.chart!;
+    expect(c.week_start).toBe("monday");
+    const sum = (a: Array<number | null>) => a.reduce((x, y) => x! + y!, 0);
+    expect(c.periods).toEqual([
+      { start: "2026-10-21", end: "2026-10-25", value: sum(c.current.slice(0, 5)), previous_start: "2026-10-12", previous_end: "2026-10-16", previous_value: sum(c.previous.slice(0, 5)) },
+      { start: "2026-10-26", end: "2026-10-30", value: sum(c.current.slice(5)), previous_start: "2026-10-17", previous_end: "2026-10-21", previous_value: sum(c.previous.slice(5)) },
+    ]);
+    expect(r.note).toMatch(/chart\.periods are computed by this server/);
   });
 
-  it("12 months by month: 13 labels, passed through verbatim, no mismatch", async () => {
+  it("a day series whose length does not match the range gives no periods and a warning (never guessed dates)", async () => {
     const client = await setup();
+    // The fake answers the 28-day fixture for any productivity request: 28 points for a 365-day range.
     const r = await productivityReport(client, { from: "2025-10-01", to: "2026-09-30", chart_metric: "replies", group_by: "month" });
+    expect(fs!.reportPosts[0]!.find(([k]) => k === "chart[group_by]")?.[1]).toBe("d");
     if (!r.available) throw new Error("unavailable");
-    expect(r.chart!.labels).toHaveLength(13);
-    expect(r.chart!.labels[0]).toBe("Oct 2, 2025");
-    expect(r.chart!.current).toEqual([4, 3, 12, 12, 6, 2, 4, 6, 7, 9, 1, 1, 13]);
-    expect(r).not.toHaveProperty("mismatch");
+    expect(r.chart!.periods).toBeNull();
+    expect(r.note).toMatch(/WARNING: no month periods: .*exactly 365 points.*got 28 day points/);
+  });
+
+  it("live October replies series (fs.reports.answer): Monday and Sunday weeks, months, previous dated from - (N-1)", async () => {
+    const OCT = [9, 4, 9, 11, 9, 10, 23, 10, 16, 5, 13, 22, 24, 47, 17, 6, 1, 9, 18, 45, 8, 20, 1, 7, 2, 13, 1, 52, 15, 10, 0];
+    const PREV = OCT.map((_, i) => i + 1);
+    const answer = {
+      status: "success",
+      msg: "",
+      report: ALL.report,
+      chart: { type: "replies", group_bys: ["d", "w"], group_by: "d", labels: OCT.map((_, i) => `Oct ${i + 1}`), datasets: [{ label: "Current", data: OCT }, { label: "Previous", data: PREV }] },
+    };
+    const client = await setup({ answer });
+    const mon = await productivityReport(client, { from: "2026-10-01", to: "2026-10-31", chart_metric: "replies", group_by: "week" });
+    const sun = await productivityReport(client, { from: "2026-10-01", to: "2026-10-31", chart_metric: "replies", group_by: "week", week_start: "sunday" });
+    const month = await productivityReport(client, { from: "2026-10-01", to: "2026-10-31", chart_metric: "replies", group_by: "month" });
+    if (!mon.available || !sun.available || !month.available) throw new Error("unavailable");
+    expect(mon.chart!.periods!.map((p) => [p.start, p.end, p.value])).toEqual([
+      ["2026-10-01", "2026-10-04", 33], ["2026-10-05", "2026-10-11", 86], ["2026-10-12", "2026-10-18", 126], ["2026-10-19", "2026-10-25", 101], ["2026-10-26", "2026-10-31", 91],
+    ]);
+    // FreeScout's own week labels end on these Saturdays.
+    expect(sun.chart!.periods!.map((p) => [p.end, p.value])).toEqual([["2026-10-03", 22], ["2026-10-10", 84], ["2026-10-17", 130], ["2026-10-24", 108], ["2026-10-31", 93]]);
+    expect(month.chart!.periods).toEqual([
+      { start: "2026-10-01", end: "2026-10-31", value: 437, previous_start: "2026-09-01", previous_end: "2026-10-01", previous_value: (31 * 32) / 2 },
+    ]);
+    expect(mon.chart!.periods![0]).toMatchObject({ previous_start: "2026-09-01", previous_end: "2026-09-04", previous_value: 1 + 2 + 3 + 4 });
+    for (const r of [mon, sun, month]) expect(r).not.toHaveProperty("mismatch");
+    // Every request asked for the day series only.
+    for (const p of fs!.reportPosts) expect(p.filter(([k]) => k.startsWith("chart["))).toEqual([["chart[group_by]", "d"], ["chart[type]", "replies"]]);
+  });
+
+  it("a null day point makes its period null; a previous series of the wrong length nulls previous_value", async () => {
+    const cur = [1, null, 3, 4, 5, 6, 7];
+    const answer = { status: "success", msg: "", report: ALL.report, chart: { type: "customers_helped", group_by: "d", labels: cur.map(String), datasets: [{ label: "Current", data: cur }, { label: "Previous", data: [1, 2] }] } };
+    const client = await setup({ answer });
+    const r = await productivityReport(client, { from: "2026-10-01", to: "2026-10-07", group_by: "week" }); // Oct 1-4, Oct 5-7
+    if (!r.available) throw new Error("unavailable");
+    expect(r.chart!.periods!.map((p) => [p.value, p.previous_value])).toEqual([[null, null], [18, null]]);
+    expect(r.note).toMatch(/previous series has 2 points, not 7/);
+  });
+
+  it("a metric-only mismatch (right day series, wrong metric): no periods, and the warning names the metric, not the length", async () => {
+    const cur = [1, 2, 3, 4, 5, 6, 7];
+    const answer = { status: "success", msg: "", report: ALL.report, chart: { type: "closed", group_by: "d", labels: cur.map(String), datasets: [{ label: "Current", data: cur }, { label: "Previous", data: cur }] } };
+    const client = await setup({ answer });
+    const r = await productivityReport(client, { from: "2026-10-01", to: "2026-10-07", group_by: "week" });
+    if (!r.available) throw new Error("unavailable");
+    expect(r.mismatch).toBeDefined();
+    expect(r.chart!.periods).toBeNull();
+    expect(r.note).toMatch(/WARNING: no week periods: FreeScout returned another chart than the requested one/);
+    expect(r.note).not.toMatch(/cannot be dated/);
   });
 
   it("§11.2 item 5 (satisfaction): no chart keys; comments only on request", async () => {
@@ -466,11 +539,11 @@ describe("reports through the real Session against the fake FreeScout", () => {
     await Promise.all([server.connect(a), mcp.connect(b)]);
     close = () => Promise.all([mcp.close(), server.close()]);
     const { tools } = await mcp.listTools();
-    for (const n of ["productivity_report", "satisfaction_report", "list_report_users"]) {
+    for (const n of ["productivity_report", "satisfaction_report", "list_report_users", "agent_stats", "conversations_report", "time_tracking_report"]) {
       expect(tools.find((t) => t.name === n)!.annotations).toMatchObject({ readOnlyHint: true, idempotentHint: true });
     }
     const pr = tools.find((t) => t.name === "productivity_report")!;
-    expect(Object.keys(pr.inputSchema.properties ?? {}).sort()).toEqual(["chart_metric", "from", "group_by", "mailbox_id", "tag_id", "to", "type", "user_id"]);
+    expect(Object.keys(pr.inputSchema.properties ?? {}).sort()).toEqual(["chart_metric", "from", "group_by", "mailbox_id", "tag_id", "to", "type", "user_id", "week_start"]);
     const sr = tools.find((t) => t.name === "satisfaction_report")!;
     expect(Object.keys(sr.inputSchema.properties ?? {}).sort()).toEqual(["from", "include_comments", "mailbox_id", "tag_id", "to", "type", "user_id"]);
     const r = await mcp.callTool({ name: "productivity_report", arguments: { from: "2026-10-01", to: "2026-10-28" } });

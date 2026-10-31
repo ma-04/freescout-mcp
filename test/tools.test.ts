@@ -38,7 +38,10 @@ describe("tool registry", () => {
       [
         "add_note",
         "add_tag",
+        "agent_stats",
+        "conversations_report",
         "close_conversation",
+        "customer_history",
         "discard_draft",
         "get_conversation",
         "get_customer",
@@ -54,6 +57,8 @@ describe("tool registry", () => {
         "save_draft",
         "search_conversations",
         "ticket_volume",
+        "time_tracking_report",
+        "waiting_conversations",
         "whoami",
       ].sort(),
     );
@@ -63,7 +68,7 @@ describe("tool registry", () => {
     expect(tools.filter((t) => /reply|send|assign|reopen|forward/i.test(t.name)).map((t) => t.name)).toEqual(["list_assignees"]);
     // Search-derived statistics (2026-10-28) are read-only.
     // Reports-module tools (2026-10-28 Phase B) are read-only too; two of them POST /reports/ajax, which only computes.
-    for (const n of ["list_assignees", "ticket_volume", "search_conversations", "list_report_users", "productivity_report", "satisfaction_report"]) {
+    for (const n of ["list_assignees", "ticket_volume", "search_conversations", "list_report_users", "productivity_report", "satisfaction_report", "agent_stats", "conversations_report", "time_tracking_report", "waiting_conversations", "customer_history"]) {
       expect(tools.find((t) => t.name === n)!.annotations?.readOnlyHint).toBe(true);
     }
     expect(tools.filter((t) => /status|close|open/i.test(t.name)).map((t) => t.name)).toEqual(["close_conversation"]);

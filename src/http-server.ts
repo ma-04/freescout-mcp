@@ -49,7 +49,7 @@ export interface HttpServerOptions {
    * registered). Shared by every session; no request header can set or widen it.
    */
   forwardAllow?: readonly string[];
-  /** FREESCOUT_STATS_DELAY_MS: pause between consecutive ticket_volume requests (default 200 ms). */
+  /** FREESCOUT_STATS_DELAY_MS: pause between consecutive ticket_volume and agent_stats requests (default 200 ms). */
   statsDelayMs?: number;
   fetchImpl?: typeof fetch;
   logger?: Logger;

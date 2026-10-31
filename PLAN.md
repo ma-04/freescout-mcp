@@ -65,9 +65,13 @@ fixtures go to `docs/fixtures/`):
    paced by `FREESCOUT_STATS_DELAY_MS`, ≤ 31 buckets, each bucket returns explicit `start`/`end` dates, the metric cards
    and the per-user table; buckets are clipped to `from..to`. Totals row summed client-side. No chart. Module missing →
    same `available:false` shape as the report tools.
-2. **`productivity_report` chart**: when `group_by` is `week`/`month`, request the **day** series and bucket it
-   client-side into `periods` (`start`, `end`, `value`), keeping FreeScout's raw series under `chart.raw` with a warning;
-   `previous` series bucketed the same way. Labels remain opaque; dates come from `from` + index.
+2. **`productivity_report` chart**: every productivity request asks for the **day** series explicitly
+   (`chart[group_by]=d&chart[type]=<metric>`, also for the default metric); FreeScout's w/m series are never
+   requested. `chart` is that day series; with `group_by` `week`/`month` the server adds `chart.periods` =
+   `{start, end, value, previous_start, previous_end, previous_value}` per calendar week (ISO or Sunday-Saturday) or
+   month, summed client-side and clipped to `from..to`; previous dated `from - (to - from)`. Labels remain opaque;
+   dates come from `from` + index; a series that is not exactly one point per day (or a metric mismatch) gives
+   `periods: null` with a warning.
 3. **`conversations_report`** and **`time_tracking_report`** (new, read-only): `POST /reports/ajax` with
    `report_name=conversations` / `time`, filters `type, mailbox_id, tag_id` (no `user_id`), per-report key whitelist in
    `assertReportForm`. Availability check must map slug `time-tracking` ↔ wire `time`. Parser dispatch becomes
@@ -153,8 +157,17 @@ Read:
 - `whoami` — current user, permission summary, session health
 - `list_assignees` — users from the search page's Assigned filter (added 2026-10-28)
 - `ticket_volume` — conversations created per day/week/month from filtered searches, optional breakdown (2026-10-28)
+- `search_conversations` parity filters `tag`, `following`, `number`, `id`, `attachment_name`; rows carry `tags` and
+  `mailbox_name` (2026-10-31, Phase C items 4-5)
+- `waiting_conversations` — active conversations whose customer has waited > N hours (folder pages, oldest first) and
+  `customer_history` — get_customer + compact list + counts by status (2026-10-31, Phase C item 6)
 - `list_report_users`, `productivity_report`, `satisfaction_report` — the paid Reports module, one guarded
-  `POST /reports/ajax` per report call that only computes a report (2026-10-28, live-verified; see Phase B above)
+  `POST /reports/ajax` per report call that only computes a report (2026-10-28, live-verified; see Phase B above).
+  `productivity_report` with `group_by` week/month requests the day series and adds `chart.periods` (2026-10-31)
+- `agent_stats` — productivity metrics + per-user table per day / ISO-or-Sunday week / month, one guarded report
+  request per bucket (≤ 31, serial, paced), client-side totals (2026-10-31, Phase C item 1)
+- `conversations_report`, `time_tracking_report` — the Conversations and Time Tracking reports (wire names
+  `conversations` / `time`), no user filter, customer names and subjects only with `include_names` (2026-10-31)
 
 Write (restricted):
 - `add_note` — internal note on a conversation. The note type is **pinned in code**; the same
