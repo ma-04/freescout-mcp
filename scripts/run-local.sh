@@ -4,10 +4,11 @@
 #   scripts/run-local.sh [stdio|http|dev|dev:http]   (default: stdio)
 #
 # First run: asks for the FreeScout URL and a cookie or login, and saves them to .env.
-# Later runs: checks .env, installs/builds if needed, then starts the server.
+# Later runs: checks .env, installs/builds if needed, offers to add the server to Claude Code
+# and Claude Desktop (stdio mode, in a terminal), then starts the server.
 # Everything the script prints goes to stderr, so in stdio mode it can be the MCP command:
 #
-#   claude mcp add freescout -- /absolute/path/to/freescout-mcp/scripts/run-local.sh
+#   claude mcp add --scope user freescout -- /absolute/path/to/freescout-mcp/scripts/run-local.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -21,7 +22,7 @@ die() { say "error: $*"; exit 1; }
 
 case "$MODE" in
   stdio | http | dev | dev:http) ;;
-  -h | --help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 0 ;;
+  -h | --help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 0 ;;
   *) die "unknown mode '$MODE' (expected stdio, http, dev or dev:http)" ;;
 esac
 
@@ -142,7 +143,78 @@ if [ "$MODE" = stdio ] || [ "$MODE" = http ]; then
   fi
 fi
 
-# --- Show how to add it to Claude Code (only when a person is at the terminal) ----------------
+# --- Hook it up to Claude (only when a person is at the terminal) -----------------------------
+
+ask_yn() { # ask_yn "question" -> 0 for yes (default yes)
+  local reply
+  printf '%s [Y/n] ' "$1" >/dev/tty; IFS= read -r reply </dev/tty
+  case "$reply" in [nN]*) return 1 ;; *) return 0 ;; esac
+}
+
+SCRIPT="$ROOT/scripts/run-local.sh"
+NAME="${FREESCOUT_MCP_NAME:-freescout}"
+
+setup_claude_code() {
+  if ! command -v claude >/dev/null; then
+    say "Claude Code CLI not found; to add it later: claude mcp add --scope user $NAME -- $SCRIPT"
+    return
+  fi
+  local existing
+  if existing="$(claude mcp get "$NAME" 2>/dev/null)"; then
+    if [[ "$existing" == *"$SCRIPT"* ]]; then
+      say "Claude Code: '$NAME' already set up"
+      return
+    fi
+    ask_yn "Claude Code already has an MCP server named '$NAME'. Replace it?" || return 0
+    claude mcp remove --scope user "$NAME" >/dev/null 2>&1 || claude mcp remove "$NAME" >/dev/null 2>&1 || true
+  else
+    ask_yn "Add '$NAME' to Claude Code (all projects)?" || return 0
+  fi
+  claude mcp add --scope user "$NAME" -- "$SCRIPT" >&2 && say "added to Claude Code; run /mcp in Claude Code to check it"
+}
+
+setup_claude_desktop() {
+  local dir
+  case "$(uname -s)" in
+    Darwin) dir="$HOME/Library/Application Support/Claude" ;;
+    Linux) dir="${XDG_CONFIG_HOME:-$HOME/.config}/Claude" ;;
+    *) return ;;
+  esac
+  if [ ! -d "$dir" ]; then
+    say "Claude Desktop not found ($dir); skipping"
+    return
+  fi
+  if [ -f "$dir/claude_desktop_config.json" ] && CONFIG="$dir/claude_desktop_config.json" NAME="$NAME" SCRIPT="$SCRIPT" \
+    node -e 'const c=JSON.parse(require("fs").readFileSync(process.env.CONFIG,"utf8"));process.exit(c.mcpServers?.[process.env.NAME]?.command===process.env.SCRIPT?0:1)' 2>/dev/null; then
+    say "Claude Desktop: '$NAME' already set up"
+    return
+  fi
+  ask_yn "Add '$NAME' to Claude Desktop?" || return 0
+  # Claude Desktop starts servers with a minimal PATH, so pass the directory of this node along.
+  CONFIG="$dir/claude_desktop_config.json" NAME="$NAME" SCRIPT="$SCRIPT" \
+    NODE_DIR="$(dirname "$(command -v node)")" node <<'JS' >&2 || say "warning: Claude Desktop config not changed"
+const fs = require("fs");
+const { CONFIG, NAME, SCRIPT, NODE_DIR } = process.env;
+let cfg = {};
+if (fs.existsSync(CONFIG)) {
+  const raw = fs.readFileSync(CONFIG, "utf8");
+  try { cfg = raw.trim() ? JSON.parse(raw) : {}; }
+  catch (e) { console.error(`run-local: ${CONFIG} is not valid JSON (${e.message}); fix it or add the server by hand`); process.exit(1); }
+  fs.copyFileSync(CONFIG, CONFIG + ".bak");
+}
+cfg.mcpServers ??= {};
+const replaced = NAME in cfg.mcpServers;
+cfg.mcpServers[NAME] = {
+  command: SCRIPT,
+  env: { PATH: [NODE_DIR, "/usr/local/bin", "/opt/homebrew/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(":") },
+};
+const tmp = CONFIG + ".tmp";
+fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
+fs.renameSync(tmp, CONFIG);
+console.error(`run-local: ${replaced ? "updated" : "added"} '${NAME}' in ${CONFIG}${fs.existsSync(CONFIG + ".bak") ? " (backup: .bak)" : ""}`);
+console.error("run-local: quit and reopen Claude Desktop to load it");
+JS
+}
 
 if [ -t 0 ]; then
   if [ "$MODE" = http ] || [ "$MODE" = dev:http ]; then
@@ -159,14 +231,14 @@ Ready. Add it to Claude Code with:
 Starting the HTTP server now; Ctrl-C to stop.
 
 EOF
-  else
+  elif [ "$MODE" = stdio ]; then
+    echo >&2
+    setup_claude_code
+    setup_claude_desktop
     cat >&2 <<EOF
 
-Ready. Add it to Claude Code with:
-
-  claude mcp add freescout -- $ROOT/scripts/run-local.sh
-
-Claude Code starts the server itself from then on. Starting it here as a test; Ctrl-C to stop.
+Ready. Claude Code / Claude Desktop start the server themselves through this script from now on.
+Starting it here once as a test; Ctrl-C to stop.
 
 EOF
   fi
