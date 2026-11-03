@@ -1,17 +1,10 @@
 # freescout-mcp
 
-An [MCP](https://modelcontextprotocol.io) server that lets an LLM agent work a
-[FreeScout](https://freescout.net) support inbox **without an API key**. It talks to
-FreeScout's normal web UI exactly like your browser does, authenticated with either a
-session cookie you paste in or your FreeScout username and password.
+An [MCP](https://modelcontextprotocol.io) server that lets Claude work a [FreeScout](https://freescout.net)
+inbox **without an API key**, using your browser cookie or login. It sees what your FreeScout user sees.
 
-It is built for support agents whose accounts can't use the FreeScout API module.
-The server sees exactly what your FreeScout user sees: the same mailboxes, the same permissions.
-
-> Status: v1 tools implemented and tested against FreeScout 1.8.248 (see `PLAN.md`,
-> `docs/freescout-endpoints.md`). Read tools, filtered search and ticket statistics, productivity and satisfaction
-> reports (paid Reports module, live-verified 2026-10-28), internal notes, reply drafts, adding and removing tags and closing
-> conversations. No customer replies. Forwarding to an operator-set allow-list is available only when `FREESCOUT_FORWARD_ALLOW` is set.
+Reads, search, stats and reports, internal notes, reply drafts, tags and closing. It never replies to customers;
+forwarding is off unless you set an allow-list.
 
 ## Quick start
 
