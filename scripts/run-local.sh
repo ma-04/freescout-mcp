@@ -27,8 +27,61 @@ case "$MODE" in
   *) die "unknown mode '$MODE' (expected stdio, http, dev or dev:http)" ;;
 esac
 
-command -v node >/dev/null || die "node not found; install Node.js 20 or newer"
-[ "$(node -p 'process.versions.node.split(".")[0]')" -ge 20 ] || die "Node.js 20 or newer required (found $(node -v))"
+# --- Node.js: use one that is 20+, or install the current LTS into .node/ (no admin needed) ----
+
+NODE_HOME="$ROOT/.node"
+
+node_ok() { # node_ok /path/to/node -> 0 if it runs and is 20 or newer
+  [ -x "$1" ] && [ "$("$1" -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -ge 20 ]
+}
+
+find_node() { # prints the directory of a usable node, if any
+  local c
+  # Claude Desktop starts servers with a minimal PATH, so look in the usual places too.
+  for c in "$NODE_HOME/bin/node" "$(command -v node 2>/dev/null || true)" /opt/homebrew/bin/node /usr/local/bin/node \
+    "$HOME/.volta/bin/node" "$HOME"/.nvm/versions/node/v*/bin/node; do
+    [ -n "$c" ] && node_ok "$c" && { dirname "$c"; return 0; }
+  done
+  return 1
+}
+
+install_node() {
+  local os arch version file base sums tmp
+  case "$(uname -s)" in Darwin) os=darwin ;; Linux) os=linux ;; *) die "can't install Node.js on $(uname -s); install Node.js 20+ from https://nodejs.org" ;; esac
+  case "$(uname -m)" in arm64 | aarch64) arch=arm64 ;; x86_64 | amd64) arch=x64 ;; *) die "can't install Node.js for $(uname -m); install Node.js 20+ from https://nodejs.org" ;; esac
+  command -v curl >/dev/null || die "curl is needed to download Node.js"
+  version="$(curl -fsSL https://nodejs.org/dist/index.json | tr '{' '\n' | grep -v '"lts":false' |
+    grep -o '"version":"v[0-9.]*"' | head -1 | cut -d'"' -f4)" || true
+  [ -n "$version" ] || die "couldn't look up the current Node.js LTS version (offline?)"
+  file="node-$version-$os-$arch.tar.gz"
+  base="https://nodejs.org/dist/$version"
+  tmp="$(mktemp -d)"
+  say "downloading Node.js $version ($os-$arch) into $NODE_HOME"
+  curl -fL --progress-bar -o "$tmp/$file" "$base/$file" || { rm -rf "$tmp"; die "download failed: $base/$file"; }
+  sums="$(curl -fsSL "$base/SHASUMS256.txt" | grep " $file\$" | cut -d' ' -f1)" || true
+  local actual
+  if command -v shasum >/dev/null; then actual="$(shasum -a 256 "$tmp/$file" | cut -d' ' -f1)"; else actual="$(sha256sum "$tmp/$file" | cut -d' ' -f1)"; fi
+  [ -n "$sums" ] && [ "$sums" = "$actual" ] || { rm -rf "$tmp"; die "checksum mismatch for $file; not installing"; }
+  rm -rf "$NODE_HOME" && mkdir -p "$NODE_HOME"
+  tar -xzf "$tmp/$file" -C "$NODE_HOME" --strip-components 1 || { rm -rf "$tmp" "$NODE_HOME"; die "couldn't unpack $file"; }
+  rm -rf "$tmp"
+  say "installed Node.js $("$NODE_HOME/bin/node" -v) (checksum verified); only this repo uses it"
+}
+
+if ! node_dir="$(find_node)"; then
+  if [ -t 0 ] && { : >/dev/tty; } 2>/dev/null; then
+    found="$(command -v node 2>/dev/null && node -v 2>/dev/null || true)"
+    say "Node.js 20 or newer not found${found:+ (found: $(echo $found))}."
+    printf 'Download the current Node.js LTS from nodejs.org into %s (no admin needed)? [Y/n] ' "$NODE_HOME" >/dev/tty
+    IFS= read -r reply </dev/tty
+    case "$reply" in [nN]*) die "install Node.js 20+ from https://nodejs.org and run this again" ;; esac
+    install_node
+    node_dir="$NODE_HOME/bin"
+  else
+    die "Node.js 20 or newer not found. Run scripts/run-local.sh once in a terminal to install it"
+  fi
+fi
+export PATH="$node_dir:$PATH"
 
 # --- First run: ask for the minimum and write .env -------------------------------------------
 # Prompts go through /dev/tty because in stdio mode stdin/stdout belong to the MCP client.
