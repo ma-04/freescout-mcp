@@ -13,19 +13,37 @@ The server sees exactly what your FreeScout user sees: the same mailboxes, the s
 > reports (paid Reports module, live-verified 2026-10-28), internal notes, reply drafts, adding and removing tags and closing
 > conversations. No customer replies. Forwarding to an operator-set allow-list is available only when `FREESCOUT_FORWARD_ALLOW` is set.
 
-## Install
+## Quick start
 
 Requires Node.js 20 or newer.
 
 ```sh
-git clone <this repo> freescout-mcp && cd freescout-mcp
+git clone https://github.com/ma-04/freescout-mcp.git && cd freescout-mcp
+scripts/run-local.sh
+```
+
+The first run asks for your FreeScout URL and either a browser cookie ([how to get it](#getting-the-cookie-from-your-browser))
+or your login, and saves them to `.env` (git-ignored, mode 600). Every run then checks `.env`, installs and
+builds if needed, prints the `claude mcp add` command to use, and starts the server (Ctrl-C to stop):
+
+```sh
+claude mcp add freescout -- /absolute/path/to/freescout-mcp/scripts/run-local.sh
+```
+
+That's it. Claude Code launches the server through the script from then on.
+
+Other modes: `scripts/run-local.sh http` (shared [HTTP server](#http-mode) on `127.0.0.1:8787`; generates
+`MCP_TOKEN` into `.env`), `dev` / `dev:http` (run from source, no build). To change settings, edit `.env` or
+delete it and run the script again.
+
+### Manual install
+
+```sh
 npm install
 npm run build
 # optional: make `freescout-mcp` available on PATH
 npm link
 ```
-
-When it's published, `npx freescout-mcp` will also work.
 
 ## Configure
 
@@ -419,6 +437,7 @@ restricted agent, plus offline regression suites in `test/redteam/`). Verdict: n
 ## Development
 
 ```sh
+scripts/run-local.sh [stdio|http|dev|dev:http]  # load .env, install/build if needed, run (see "Quick start")
 npm run dev        # run from source with tsx
 npm run dev:http   # HTTP mode from source (needs MCP_TOKEN, FREESCOUT_URL)
 npm run build      # compile to dist/
