@@ -16,6 +16,8 @@
     "dev:http": "tsx src/http.ts",
     "start": "node dist/index.js",
     "start:http": "node dist/http.js",
+    "local": "scripts/run-local.sh",
+    "local:http": "scripts/run-local.sh http",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prepublishOnly": "npm run build"
