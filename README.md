@@ -24,13 +24,18 @@ scripts/run-local.sh
 
 The first run asks for your FreeScout URL and either a browser cookie ([how to get it](#getting-the-cookie-from-your-browser))
 or your login, and saves them to `.env` (git-ignored, mode 600). Every run then checks `.env`, installs and
-builds if needed, prints the `claude mcp add` command to use, and starts the server (Ctrl-C to stop):
+builds if needed, and (unless already done) offers to add the server to **Claude Code** (user scope, all projects) and **Claude Desktop**
+(`claude_desktop_config.json`, backed up to `.bak` first; restart Desktop afterwards). It then starts the server
+once as a test (Ctrl-C to stop). From then on Claude launches it through the script.
+
+To add it by hand instead:
 
 ```sh
-claude mcp add freescout -- /absolute/path/to/freescout-mcp/scripts/run-local.sh
+claude mcp add --scope user freescout -- /absolute/path/to/freescout-mcp/scripts/run-local.sh
 ```
 
-That's it. Claude Code launches the server through the script from then on.
+or in `claude_desktop_config.json`, `"freescout": {"command": "/absolute/path/to/freescout-mcp/scripts/run-local.sh"}`.
+Set `"env": {"PATH": "..."}` to a PATH that contains `node` there, because Desktop starts servers with a minimal PATH.
 
 Other modes: `scripts/run-local.sh http` (shared [HTTP server](#http-mode) on `127.0.0.1:8787`; generates
 `MCP_TOKEN` into `.env`), `dev` / `dev:http` (run from source, no build). To change settings, edit `.env` or
