@@ -1,69 +1,32 @@
 # freescout-mcp
 
-An [MCP](https://modelcontextprotocol.io) server that lets an LLM agent work a
-[FreeScout](https://freescout.net) support inbox **without an API key**. It talks to
-FreeScout's normal web UI exactly like your browser does, authenticated with either a
-session cookie you paste in or your FreeScout username and password.
+An [MCP](https://modelcontextprotocol.io) server that lets Claude work a [FreeScout](https://freescout.net)
+inbox **without an API key**, using your browser cookie or login. It sees what your FreeScout user sees.
 
-It is built for support agents whose accounts can't use the FreeScout API module.
-The server sees exactly what your FreeScout user sees: the same mailboxes, the same permissions.
-
-> Status: v1 tools implemented and tested against FreeScout 1.8.248 (see `PLAN.md`,
-> `docs/freescout-endpoints.md`). Read tools, filtered search and ticket statistics, productivity and satisfaction
-> reports (paid Reports module, live-verified 2026-10-28), internal notes, reply drafts, adding and removing tags and closing
-> conversations. No customer replies. Forwarding to an operator-set allow-list is available only when `FREESCOUT_FORWARD_ALLOW` is set.
+Reads, search, stats and reports, internal notes, reply drafts, tags and closing. It never replies to customers;
+forwarding is off unless you set an allow-list.
 
 ## Quick start
 
-Requires Node.js 20 or newer.
+macOS or Linux:
 
 ```sh
-git clone https://github.com/ma-04/freescout-mcp.git && cd freescout-mcp
-scripts/run-local.sh
+git clone https://github.com/ma-04/freescout-mcp.git ~/freescout-mcp
+~/freescout-mcp/scripts/run-local.sh
 ```
 
-The first run asks for your FreeScout URL and either a browser cookie ([how to get it](#getting-the-cookie-from-your-browser))
-or your login, and saves them to `.env` (git-ignored, mode 600). Every run then checks `.env`, installs and
-builds if needed, and (unless already done) offers to add the server to **Claude Code** (user scope, all projects) and **Claude Desktop**
-(`claude_desktop_config.json`, backed up to `.bak` first; restart Desktop afterwards). It then starts the server
-once as a test (Ctrl-C to stop). From then on Claude launches it through the script.
+The script asks for your FreeScout URL and a [browser cookie](#getting-the-cookie-from-your-browser) or login,
+installs Node.js if needed, adds the server to Claude Code and Claude Desktop, and keeps the repo updated.
+Restart Claude Desktop afterwards.
 
-To add it by hand instead:
-
-```sh
-claude mcp add --scope user freescout -- /absolute/path/to/freescout-mcp/scripts/run-local.sh
-```
-
-or in `claude_desktop_config.json`, `"freescout": {"command": "/absolute/path/to/freescout-mcp/scripts/run-local.sh"}`.
-Set `"env": {"PATH": "..."}` to a PATH that contains `node` there, because Desktop starts servers with a minimal PATH.
-
-**Updates.** Each start applies the last background `git fetch` (fast-forward only, and only when you have no
-local changes to tracked files), installs and rebuilds as needed, and starts a new background fetch if the last one is more than
-6 hours old. So a restart of Claude picks up new versions. `FREESCOUT_AUTO_UPDATE=0` in `.env` turns this off;
-`FREESCOUT_UPDATE_INTERVAL_HOURS` changes the interval.
-
-**macOS: "Operation not permitted" in Claude Desktop.** macOS doesn't let apps read `~/Desktop`, `~/Documents`,
-`~/Downloads` or iCloud Drive without permission, so Claude Desktop can't start the script from there. Move the
-repo and run the script again (it updates the Claude config to the new path):
-
-```sh
-mv ~/Desktop/path/to/freescout-mcp ~/freescout-mcp && ~/freescout-mcp/scripts/run-local.sh
-```
-
-or allow it in System Settings > Privacy & Security > Files and Folders > Claude.
-
-Other modes: `scripts/run-local.sh http` (shared [HTTP server](#http-mode) on `127.0.0.1:8787`; generates
-`MCP_TOKEN` into `.env`), `dev` / `dev:http` (run from source, no build). To change settings, edit `.env` or
-delete it and run the script again.
+- Settings live in `.env`; edit it or delete it and rerun.
+- Auto-update: set `FREESCOUT_AUTO_UPDATE=0` in `.env` to turn it off.
+- macOS "Operation not permitted": don't keep the repo in `~/Desktop`, `~/Documents` or `~/Downloads`.
+- Other modes: `run-local.sh http` ([HTTP mode](#http-mode)), `dev`, `dev:http`.
 
 ### Manual install
 
-```sh
-npm install
-npm run build
-# optional: make `freescout-mcp` available on PATH
-npm link
-```
+`npm install && npm run build`, then [configure](#configure) and [add it to Claude](#use-with-claude).
 
 ## Configure
 
