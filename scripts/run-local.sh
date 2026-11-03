@@ -4,8 +4,9 @@
 #   scripts/run-local.sh [stdio|http|dev|dev:http]   (default: stdio)
 #
 # First run: asks for the FreeScout URL and a cookie or login, and saves them to .env.
-# Later runs: checks .env, installs/builds if needed, offers to add the server to Claude Code
-# and Claude Desktop (stdio mode, in a terminal), then starts the server.
+# Later runs: checks .env, updates from git (see "Auto-update" below), installs/builds if
+# needed, offers to add the server to Claude Code and Claude Desktop (stdio mode, in a
+# terminal), then starts the server.
 # Everything the script prints goes to stderr, so in stdio mode it can be the MCP command:
 #
 #   claude mcp add --scope user freescout -- /absolute/path/to/freescout-mcp/scripts/run-local.sh
@@ -22,7 +23,7 @@ die() { say "error: $*"; exit 1; }
 
 case "$MODE" in
   stdio | http | dev | dev:http) ;;
-  -h | --help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 0 ;;
+  -h | --help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 0 ;;
   *) die "unknown mode '$MODE' (expected stdio, http, dev or dev:http)" ;;
 esac
 
@@ -119,8 +120,9 @@ else
   fi
 fi
 
-if command -v curl >/dev/null; then
-  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "${FREESCOUT_URL%/}/login" || true)"
+# Reachability check only for a person at the terminal; it would only slow down MCP launches.
+if [ -t 0 ] && command -v curl >/dev/null; then
+  code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "${FREESCOUT_URL%/}/login" || true)"
   case "$code" in
     2?? | 3??) say "FreeScout reachable (${FREESCOUT_URL%/}/login -> $code)" ;;
     000) say "warning: could not reach $FREESCOUT_URL (check the URL / VPN)" ;;
@@ -128,9 +130,46 @@ if command -v curl >/dev/null; then
   esac
 fi
 
-# --- Install, build, start --------------------------------------------------------------------
+# --- Install, update, build -------------------------------------------------------------------
+# Claude Desktop may start several copies at once, so this part runs under a lock.
 
-if [ ! -d node_modules ]; then
+LOCK="$ROOT/.run-local.lock"
+for _ in $(seq 1 120); do
+  mkdir "$LOCK" 2>/dev/null && break
+  # A lock older than 10 minutes is left over from a killed run.
+  [ -n "$(find "$LOCK" -maxdepth 0 -mmin +10 2>/dev/null)" ] && rmdir "$LOCK" 2>/dev/null
+  sleep 0.5
+done
+trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
+
+# Auto-update: apply the last background fetch (fast-forward only, clean tree, branch with an
+# upstream), then start a new background fetch if the last one is older than the interval.
+# The fetch never delays startup; what it brings in is applied on the next start.
+# FREESCOUT_AUTO_UPDATE=0 turns this off; FREESCOUT_UPDATE_INTERVAL_HOURS sets the interval (6).
+if [ "${FREESCOUT_AUTO_UPDATE:-1}" != 0 ] && command -v git >/dev/null && [ -d "$ROOT/.git" ]; then
+  if upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)"; then
+    behind="$(git rev-list --count "HEAD..$upstream" 2>/dev/null || echo 0)"
+    if [ "$behind" -gt 0 ]; then
+      if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+        say "update: $behind new commit(s) on $upstream, but the working tree has local changes; not updating"
+      elif git merge --ff-only -q "$upstream" >/dev/null 2>&1; then
+        say "update: pulled $behind commit(s) from $upstream (now $(git rev-parse --short HEAD))"
+        updated=1
+      else
+        say "update: $upstream can't be fast-forwarded (local commits?); not updating"
+      fi
+    fi
+    stamp="$ROOT/.git/run-local-last-fetch"
+    interval_min=$(( ${FREESCOUT_UPDATE_INTERVAL_HOURS:-6} * 60 ))
+    if [ ! -f "$stamp" ] || [ -n "$(find "$stamp" -mmin +"$interval_min" 2>/dev/null)" ]; then
+      touch "$stamp"
+      ( GIT_TERMINAL_PROMPT=0 git fetch -q "${upstream%%/*}" </dev/null >/dev/null 2>&1 & )
+    fi
+  fi
+fi
+
+# Install when node_modules is missing or package-lock.json changed (e.g. after an update).
+if [ ! -d node_modules ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then
   say "installing dependencies"
   npm install --no-audit --no-fund >&2
 fi
@@ -140,7 +179,16 @@ if [ "$MODE" = stdio ] || [ "$MODE" = http ]; then
     [ -n "$(find src package.json tsconfig.json -newer dist/index.js -print -quit)" ]; then
     say "building"
     npm run --silent build >&2
+    touch dist/index.js
   fi
+fi
+
+rmdir "$LOCK" 2>/dev/null || true
+trap - EXIT
+
+# This script may itself have changed in the update: run the new version (once).
+if [ -n "${updated:-}" ] && [ -z "${RUN_LOCAL_REEXEC:-}" ]; then
+  RUN_LOCAL_REEXEC=1 exec "$ROOT/scripts/run-local.sh" "$MODE"
 fi
 
 # --- Hook it up to Claude (only when a person is at the terminal) -----------------------------
@@ -184,12 +232,33 @@ setup_claude_desktop() {
     say "Claude Desktop not found ($dir); skipping"
     return
   fi
+  # macOS privacy protection: apps need explicit permission to read ~/Desktop, ~/Documents,
+  # ~/Downloads and iCloud Drive. Without it Claude Desktop fails with "Operation not permitted".
+  local protected=""
+  if [ "$(uname -s)" = Darwin ]; then
+    case "$ROOT/" in
+      "$HOME/Desktop/"* | "$HOME/Documents/"* | "$HOME/Downloads/"* | "$HOME/Library/Mobile Documents/"*) protected=1 ;;
+    esac
+  fi
+  if [ -n "$protected" ]; then
+    cat >&2 <<EOF
+
+run-local: warning: this repo is in a folder macOS protects ($ROOT).
+  Claude Desktop can't start the server from there ("Operation not permitted") unless you either
+    - move the repo, e.g.:  mv "$ROOT" ~/freescout-mcp && ~/freescout-mcp/scripts/run-local.sh
+    - or allow it: System Settings > Privacy & Security > Files and Folders > Claude > the folder
+EOF
+  fi
   if [ -f "$dir/claude_desktop_config.json" ] && CONFIG="$dir/claude_desktop_config.json" NAME="$NAME" SCRIPT="$SCRIPT" \
     node -e 'const c=JSON.parse(require("fs").readFileSync(process.env.CONFIG,"utf8"));process.exit(c.mcpServers?.[process.env.NAME]?.command===process.env.SCRIPT?0:1)' 2>/dev/null; then
     say "Claude Desktop: '$NAME' already set up"
     return
   fi
-  ask_yn "Add '$NAME' to Claude Desktop?" || return 0
+  if [ -n "$protected" ]; then
+    ask_yn "Add '$NAME' to Claude Desktop anyway (after granting the permission)?" || return 0
+  else
+    ask_yn "Add '$NAME' to Claude Desktop?" || return 0
+  fi
   # Claude Desktop starts servers with a minimal PATH, so pass the directory of this node along.
   CONFIG="$dir/claude_desktop_config.json" NAME="$NAME" SCRIPT="$SCRIPT" \
     NODE_DIR="$(dirname "$(command -v node)")" node <<'JS' >&2 || say "warning: Claude Desktop config not changed"
