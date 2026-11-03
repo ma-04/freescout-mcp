@@ -37,6 +37,21 @@ claude mcp add --scope user freescout -- /absolute/path/to/freescout-mcp/scripts
 or in `claude_desktop_config.json`, `"freescout": {"command": "/absolute/path/to/freescout-mcp/scripts/run-local.sh"}`.
 Set `"env": {"PATH": "..."}` to a PATH that contains `node` there, because Desktop starts servers with a minimal PATH.
 
+**Updates.** Each start applies the last background `git fetch` (fast-forward only, and only when you have no
+local changes to tracked files), installs and rebuilds as needed, and starts a new background fetch if the last one is more than
+6 hours old. So a restart of Claude picks up new versions. `FREESCOUT_AUTO_UPDATE=0` in `.env` turns this off;
+`FREESCOUT_UPDATE_INTERVAL_HOURS` changes the interval.
+
+**macOS: "Operation not permitted" in Claude Desktop.** macOS doesn't let apps read `~/Desktop`, `~/Documents`,
+`~/Downloads` or iCloud Drive without permission, so Claude Desktop can't start the script from there. Move the
+repo and run the script again (it updates the Claude config to the new path):
+
+```sh
+mv ~/Desktop/path/to/freescout-mcp ~/freescout-mcp && ~/freescout-mcp/scripts/run-local.sh
+```
+
+or allow it in System Settings > Privacy & Security > Files and Folders > Claude.
+
 Other modes: `scripts/run-local.sh http` (shared [HTTP server](#http-mode) on `127.0.0.1:8787`; generates
 `MCP_TOKEN` into `.env`), `dev` / `dev:http` (run from source, no build). To change settings, edit `.env` or
 delete it and run the script again.
