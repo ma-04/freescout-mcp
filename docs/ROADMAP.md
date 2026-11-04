@@ -30,7 +30,7 @@ Legend: effort S/M/L (hours of agent work), risk = what a bug could do in produc
 | 2.4 | `star_conversation`, `follow_conversation` | Capture the ajax actions on the demo | S | none | pinned |
 | 2.5 | `move_conversation` | `GET /conversation/ajax-html/move_conv` + its POST; target mailbox must be one the agent can view | M | ticket disappears from a team's view | mailbox id validated, after-state check |
 | 2.6 | Bulk tagging | Tags module bulk UI (§9); `remove_tag` for one conversation shipped 2026-10-28 | S | lost categorisation | array `conversation_id` must get its own guard |
-| 2.7 | `remove_note` (shipped 2026-11-04) | `delete_thread` ajax (§5.6); own plain notes only, refused before any POST otherwise | S | the note is hard-deleted (body returned) | pinned `{action, thread_id}`, author/type/forward/`can_delete` checks, after-state check |
+| 2.7 | `remove_note` (shipped 2026-11-04; not reversible) | `delete_thread` ajax (§5.6); own plain notes only, refused before any POST otherwise | S | the note is hard-deleted (body returned) | pinned `{action, thread_id}`, author/type/forward/`can_delete` checks, after-state check |
 
 ## Tier 3: policy decisions (recommend keeping OUT)
 
