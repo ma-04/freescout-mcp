@@ -154,6 +154,7 @@ describe("removeNote against the fake FreeScout (real Session)", () => {
     { id: 105, type: "draft", body: "<p>draft</p>" },
     { type: "lineitem", body: "You marked as Active" },
     { id: 106, type: "note", body: "Fwd without link", forward: true, to: ["lead@team.example"] },
+    { id: 107, type: "note", body: "Fwd alert only", forward_alert_only: 2 },
   ];
   const deletePosts = () => fs.convPosts.map((p) => p.filter(([k]) => k !== "_token"));
 
@@ -163,7 +164,7 @@ describe("removeNote against the fake FreeScout (real Session)", () => {
     expect(res).toMatchObject({ conversation_id: 9, thread_id: 102, removed: true, body: "My note" });
     expect(deletePosts()).toEqual([[["action", "delete_thread"], ["thread_id", "102"]]]);
     expect(fs.convPosts[0]!.map(([k]) => k).sort()).toEqual(["_token", "action", "thread_id"]);
-    expect(fs.convs.get(9)!.threads.map((t) => t.id)).toEqual([100, 101, 103, 104, 105, undefined, 106]);
+    expect(fs.convs.get(9)!.threads.map((t) => t.id)).toEqual([100, 101, 103, 104, 105, undefined, 106, 107]);
     // Second call: the note is gone, so it fails cleanly without posting again.
     await expect(removeNote(client, 9, 102)).rejects.toThrow(/not on conversation 9/);
     expect(fs.convPosts).toHaveLength(1);
@@ -178,6 +179,7 @@ describe("removeNote against the fake FreeScout (real Session)", () => {
       [104, /forward note/],
       [105, /reply draft/],
       [106, /forward note/],
+      [107, /forward note/], // only the .alert.alert-note marker, no badge, no recipients
       [1101, /not on conversation 9/], // a note of another conversation
     ];
     for (const [id, re] of cases) await expect(removeNote(client, 9, id), String(id)).rejects.toThrow(re);
@@ -220,6 +222,6 @@ describe("removeNote against the fake FreeScout (real Session)", () => {
   it("a new inbound customer thread arriving meanwhile is not an error", async () => {
     const client = await setup(BASE_THREADS());
     fs.misbehave.teammate = (c) => c.threads.push({ id: 900, type: "customer", body: "new mail", to: ["support@fake.example"] });
-    await expect(removeNote(client, 9, 102)).resolves.toMatchObject({ removed: true, thread_count_before: 8, thread_count_after: 8 });
+    await expect(removeNote(client, 9, 102)).resolves.toMatchObject({ removed: true, thread_count_before: 9, thread_count_after: 9 });
   });
 });

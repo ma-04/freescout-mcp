@@ -259,7 +259,10 @@ function forwardInfo($: CheerioAPI, el: ReturnType<CheerioAPI>): Pick<ParsedThre
     return /forward|share|arrow-right/i.test(`${x.attr("class") ?? ""} ${x.attr("title") ?? ""} ${x.find("[class]").attr("class") ?? ""} ${x.text()}`);
   });
   const header = el.find(".thread-header, .thread-title").filter(outsideBody).first();
-  if (!badge.length && !/\bforwarded\b/i.test(squish(header.text()))) return {};
+  // FreeScout's forward alert alone also marks a forward (no badge needed): the record of a sent email must never
+  // be read as a plain note.
+  const alert = el.find(".thread-body .alert.alert-note").filter(outsideBody).filter((_, a) => /\bforward/i.test(squish($(a).text())));
+  if (!badge.length && !alert.length && !/\bforwarded\b/i.test(squish(header.text()))) return {};
   let child: number | undefined;
   el.find("a[href]").each((_, a) => {
     const x = $(a);

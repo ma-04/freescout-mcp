@@ -479,6 +479,8 @@ export interface FakeThread {
   forward_child?: number;
   /** Forward note rendered with the badge but without the child-conversation link. */
   forward?: boolean;
+  /** Forward note rendered with only FreeScout's `.alert.alert-note` forward alert: no badge, no recipients. */
+  forward_alert_only?: number;
   /** Author user id of a message/note (default: the logged-in user). Rendered as /users/profile/N, "you" when own. */
   by?: number;
   /**
@@ -533,7 +535,8 @@ export function simConversationPage(base: string, token: string, id: number, c: 
         : "";
     // Real markup (captured from the demo, 2026-10-27): the badge sits in .thread-message before .thread-header, and the
     // child link is FreeScout chrome inside .thread-body but OUTSIDE .thread-content: `.alert.alert-note`.
-    const fwdAlert = t.forward_child !== undefined ? `<div class="alert alert-note">You forwarded this conversation. Forwarded conversation: <a href="${base}/conversation/${t.forward_child + 1000}">#${t.forward_child}</a></div>` : "";
+    const alertChild = t.forward_child ?? t.forward_alert_only;
+    const fwdAlert = alertChild !== undefined ? `<div class="alert alert-note">You forwarded this conversation. Forwarded conversation: <a href="${base}/conversation/${alertChild + 1000}">#${alertChild}</a></div>` : "";
     const recips = t.to?.length ? `<div class="thread-recipients"><div><strong>To:</strong> ${esc(t.to.join(", "))}</div></div>` : "";
     const content = t.type === "draft" ? `<div class="thread-body">${t.body}</div>` : `<div class="thread-body">${fwdAlert}<div class="thread-content">${t.body}</div></div>`;
     return `<div class="thread thread-type-${t.type}" id="thread-${t.id}" data-thread_id="${t.id}"><div class="thread-message">${fwd}<div class="thread-header"><div class="thread-title"><div class="thread-person"><strong>${person}</strong></div>${recips}</div><div class="thread-info"><a href="#thread-${t.id}" class="thread-date" title="Oct 26, 2026 10:00">now</a></div></div>${content}</div>${options}</div>`;
