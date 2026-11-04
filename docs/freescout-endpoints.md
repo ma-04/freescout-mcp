@@ -353,8 +353,11 @@ conversation is a draft it deletes the conversation and returns `redirect_url`).
 - `action=conversation_change_status` with any status other than `3` (closed), see §5.4: no reopen, pending, spam or
   `not_spam`.
 - `GET /conversation/undo-reply/{thread_id}/{token}` reverts a just-sent reply to a draft (only within the undo timeout).
+- `action=delete_thread` from anything but the pinned form of §5.6 (`{action, thread_id}` only, built and asserted by
+  `buildDeleteThreadForm`/`assertDeleteThreadForm`, and only after the MCP has checked the thread is the logged-in
+  agent's own plain note on the named conversation). Moved out of the "out of scope" list below on 2026-11-04.
 - Also out of scope: `conversation_change_user`, `star_conversation`,
-  `delete_conversation*`, `restore_conversation`, `save_edit_thread`, `delete_thread`, `bulk_*`, `empty_folder`,
+  `delete_conversation*`, `restore_conversation`, `save_edit_thread`, `bulk_*`, `empty_folder`,
   `conversation_move`, `conversation_merge`, `conversation_change_customer`, `update_subject`, `follow`/`unfollow`,
   `retry_send`, `save_after_send`.
 
@@ -439,6 +442,54 @@ adds one, and a close adds exactly one, so any extra means a teammate changed st
 and our POST, and the stale `status`/`user_id` we sent may have overwritten it (FreeScout applies them
 unconditionally). The call then succeeds with `concurrent_change_detected: true` and a `warning` (same for
 `add_note` and `close_conversation`). Heuristic only: a change made after our re-read is not seen.
+
+### 5.6 Delete a note: `action=delete_thread` (own plain notes only; `remove_note`, 2026-11-04)
+Source: FreeScout `master` at `86d99c1` (2026-11-02), read 2026-11-04: `app/Http/Controllers/ConversationsController.php`
+`ajax()` case `delete_thread` (line 2118), `app/Policies/ThreadPolicy.php` `delete()`, `app/Thread.php` `deleteThread()`
+(line 804) / `isNote()` / `isForward()`, `public/js/main.js` `deleteThread()` (line 5171, bound to `.thread-delete-trigger`
+at line 1464) and `resources/views/conversations/partials/thread.blade.php` (line 321). Exercised live on the demo
+2026-11-04 as the restricted agent (`test/integration-tools.test.ts`, "remove_note"): the own note showed the Delete
+item, the POST answered `status: success`, the thread row was gone from the database, status/assignee unchanged, and a
+repeat call was refused by the MCP before posting.
+
+Wire form (what the browser sends, `main.js deleteThread()` via `fsAjax`):
+
+| Field | Value |
+|---|---|
+| `action` | `delete_thread` |
+| `thread_id` | the thread's id (`.thread[data-thread_id]`) |
+| `_token` | CSRF token (added by `fsAjax`/`ajaxSetup`; the MCP's Session adds it, plus `X-CSRF-TOKEN`) |
+
+**There is no `conversation_id`.** FreeScout looks the thread up by id alone (`Thread::find($request->thread_id)`), so the
+binding to a conversation exists only in the MCP's own pre-check (the thread must be on the page it just read).
+
+Server checks, in order (HTTP 200 `{"status":"error","msg":…}`):
+1. `!$thread || !$thread->isNote()` → `Thread not found`. `isNote()` is `type == TYPE_NOTE`, so customer messages,
+   replies and drafts (drafts are `TYPE_MESSAGE` + `STATE_DRAFT`) are refused; a **forward note is a note**
+   (`TYPE_NOTE`, `subtype = SUBTYPE_FORWARD`) and is **not** refused by the server.
+2. `!$user->can('delete', $thread)` → `Not enough permissions`. `ThreadPolicy::delete()`: only when
+   `created_by_user_id == $user->id` ("Admin also can delete only own notes", no admin override), and the user still
+   has access to the mailbox, the mailbox is not archived (non-admins), and, for users limited to assigned
+   conversations, the conversation is assigned to or created by them.
+
+Success: `$thread->deleteThread()` deletes the thread's attachments, then the row (`Thread` has no `SoftDeletes`: a hard
+delete, not restorable from the UI), then `Conversation::updatePreview()`; answers `{"status":"success","msg":""}`. No
+event is fired, nobody is notified, status/assignee/folders are untouched, nothing is emailed. (`status: success`
+observed live on the demo; the empty `msg` is from source.) A second call for the same id answers `Thread not found`.
+
+UI: the thread menu shows **Delete** only when `isNote() && !$thread->first && can('delete', $thread)`
+(`thread.blade.php:321`), rendered as `<a class="thread-delete-trigger">` inside the thread's `.dropdown.thread-options`
+(captured in `docs/fixtures/conversation-9.html` on own note 19). The server does **not** check `first` (a conversation
+whose first thread is a note, e.g. a phone conversation), so the UI is stricter than the endpoint.
+
+What the MCP does (`removeNote`, tool `remove_note`): GET the conversation page (fresh token), refuse an unsent draft
+conversation, find `thread_id` among the page's threads (absent → "not on conversation", no POST), and refuse before any
+POST unless the thread is `type` note, not a forward (`is_forward`, or recipients rendered, which the blade only does
+for forwards), authored by the logged-in user (author link `/users/profile/{id}` equal to `body[data-auth_user_id]`),
+not the first thread, and offered for deletion by FreeScout itself (`.thread-delete-trigger` in its own
+`.thread-options`, parsed as `can_delete`). Then `assertDeleteThreadForm` pins exactly `{action:"delete_thread",
+thread_id:"<positive int>"}` and the one POST goes out. Afterwards the page is re-read: the thread must be gone (else
+error) and every other thread id from before must still be there (else `DANGER`).
 
 ---
 

@@ -2,7 +2,8 @@
 
 Scope: adversarial review of the MCP server's core safety promise — it may read, add internal
 notes, save/discard its own reply drafts and (since 2026-10-25) add tags (since 2026-10-28 also remove them), but must **never** send email to a customer, change
-status, assign, forward, or delete anything except its own drafts.
+status, assign, forward, or delete anything except its own drafts (since 2026-11-04 also its own plain internal notes,
+see "remove_note" at the end).
 
 Method: attacks driven through the real MCP operations against the live demo
 (`https://freescout.example.com`) as the **restricted agent** (`agent@…`, Support mailbox only),
@@ -387,3 +388,33 @@ eight in `src/operations.ts`, `fetchReport` in `src/reports.ts`) besides the per
 | 9 | Info | PLAN Phase C item 2 still described `chart.raw` | Reworded to what was built | Fixed |
 | 10 | New | `agent_stats` bucket `users: null` when a report has no users table (seen live for today) | `users: []` with a note | Fixed |
 | 11 | Leftover | `FREESCOUT_STATS_DELAY_MS` comments named only `ticket_volume` | Mention `agent_stats` | Fixed |
+
+## remove_note (2026-11-04)
+
+Scope change: one destructive write added, always registered. `delete_thread` moves out of the endpoint doc's NEVER
+list (docs/freescout-endpoints.md §5.3, §5.6). FreeScout deletes by **thread id alone** (no conversation id), refuses
+non-notes (`Thread not found`) and other users' notes (`ThreadPolicy::delete`: own only, even for admins), and
+hard-deletes the row and its attachments. It does **not** refuse forward notes or a conversation's first thread.
+
+Guards (all before the POST, on a fresh page read):
+- The thread must be on the named conversation's page (blocks deleting a note of another conversation by id, and makes
+  a repeat call a clean "not on conversation" error with no POST).
+- `type` must be `note`; customer messages, replies, drafts, log lines and unknown types are refused by name.
+- Forward notes are refused (forward badge, or recipients rendered, which FreeScout only does for forwards): they are
+  the only record that an email went out.
+- The author link must be `/users/profile/{data-auth_user_id}` and rendered as the current user; other users' notes are
+  refused even if the page offers Delete for them (tested with a fake that renders it).
+- The first thread is refused, and FreeScout's own Delete menu item (`.thread-delete-trigger` in the thread's
+  `.thread-options`, never inside agent-written `.thread-content`) must be present.
+- `assertDeleteThreadForm` pins exactly `{action:"delete_thread", thread_id:"<positive int>"}`: arrays, a
+  `conversation_id`, `_token`, other actions (`delete_conversation*`, `save_edit_thread`, …) are refused.
+- After the POST the page is re-read: the note still shown is an error; any other thread that vanished is `DANGER`.
+
+Source-scan tests (red-team file, "the one delete_thread POST"): four quoted `delete_thread` strings in `src/`, all in
+`src/operations.ts` (type, guard comparison, guard message, the one builder value), one guarded call site
+(`assertDeleteThreadForm(form); checkAjax(await port.ajaxPost<AjaxEnvelope>(AJAX, form), "remove_note")`), and no
+`delete_conversation`, `save_edit_thread`, `load_edit_thread`, `empty_folder`, `restore_conversation`, `conversation_merge`,
+`conversation_move` or `bulk_delete` anywhere. The total `port.ajaxPost(` call sites go from 9 to 10 (six to `AJAX`).
+A tool-level test drives a customer message asking to "delete all internal notes" plus colleague, forward and
+other-conversation note ids through `remove_note`: none is posted; only the agent's own note is, with exactly
+`action` + `thread_id` (+ `_token`) on the wire.

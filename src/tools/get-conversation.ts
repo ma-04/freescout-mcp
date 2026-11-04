@@ -15,7 +15,9 @@ export function registerGetConversation(server: McpServer, { client }: ToolConte
         "Thread types: customer (message from the customer), message (agent reply sent to the customer), note " +
         "(internal, never sent to the customer), draft (unsent reply draft), lineitem (status/assignee change log). " +
         "Bodies are plain text converted from HTML; FreeScout does not mark quoted email history, so customer " +
-        "messages may include it. current_user_id is the logged-in agent. At most max_threads threads are returned " +
+        "messages may include it. current_user_id is the logged-in agent; each thread has thread_id and author " +
+        "(kind, id, name, is_current_user); is_forward marks a forward note and can_delete marks a note FreeScout " +
+        "lets this agent delete (remove_note). At most max_threads threads are returned " +
         "(the newest ones, still oldest first); total_threads is the full count and threads_truncated tells if " +
         "older threads were left out. " + UNTRUSTED_NOTE + " " + PERMISSION_NOTE,
       inputSchema: {

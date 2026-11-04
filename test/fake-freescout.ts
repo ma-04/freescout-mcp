@@ -88,6 +88,10 @@ export class FakeFreeScout {
      * status/assignee change with its status line, which happened between our page read and our POST).
      */
     teammate?: (conv: FakeConv) => void;
+    /** delete_thread answers success but deletes nothing. */
+    deleteNoop?: boolean;
+    /** delete_thread also deletes this other thread id (from whichever simulated conversation has it). */
+    deleteAlsoRemoves?: number;
   } = {};
   /**
    * Search simulation (GET /search, docs/freescout-endpoints.md §10.1). Rows default to the demo DB listing in §10.4
@@ -211,9 +215,38 @@ export class FakeFreeScout {
     return [200, { status: "error", msg: "Unknown action" }];
   }
 
+  /** Session user of the POST being handled (delete_thread checks the author against it). */
+  private postUserId = 7;
+
+  /**
+   * delete_thread (ConversationsController::ajax, FreeScout master 86d99c1): looked up by thread id alone across all
+   * simulated conversations; not a note -> "Thread not found"; another user's note -> "Not enough permissions"
+   * (ThreadPolicy::delete: created_by_user_id == user id); otherwise the thread is removed for good.
+   */
+  private deleteThread(form: URLSearchParams): [number, unknown] | null {
+    const id = Number(form.get("thread_id"));
+    const owner = [...this.convs.values()].find((c) => c.threads.some((t) => t.id === id));
+    if (!owner && ![...this.convs.values()].length) return null;
+    this.convPosts.push([...form.entries()]);
+    const teammate = this.misbehave.teammate;
+    if (teammate && owner) {
+      this.misbehave.teammate = undefined;
+      teammate(owner);
+    }
+    const t = owner?.threads.find((x) => x.id === id);
+    if (!owner || !t || t.type !== "note") return [200, { status: "error", msg: "Thread not found" }];
+    if ((t.by ?? this.postUserId) !== this.postUserId) return [200, { status: "error", msg: "Not enough permissions" }];
+    if (this.misbehave.deleteNoop) return [200, { status: "success", msg: "" }];
+    owner.threads = owner.threads.filter((x) => x !== t);
+    const extra = this.misbehave.deleteAlsoRemoves;
+    if (extra !== undefined) for (const c of this.convs.values()) c.threads = c.threads.filter((x) => x.id !== extra);
+    return [200, { status: "success", msg: "" }];
+  }
+
   /** POST /conversation/ajax against the simulated conversations. Null = not simulated (legacy reply). */
   private convAjax(form: URLSearchParams): [number, unknown] | null {
     const action = form.get("action");
+    if (action === "delete_thread") return this.deleteThread(form);
     if (action !== "conversation_change_status" && action !== "send_reply") return null;
     const id = Number(form.get("conversation_id"));
     const conv = this.convs.get(id);
@@ -409,6 +442,7 @@ export class FakeFreeScout {
       case "POST /conversation/ajax": {
         if (!sess.authed) return json(401, { message: "Unauthenticated." });
         if (form.get("action") === "forbidden") return json(403, { message: "This action is unauthorized." });
+        this.postUserId = sess.userId ?? 7;
         const sim = this.convAjax(form);
         if (sim && this.misbehave.forwardDropsConnection && form.get("subtype") === "1") {
           this.misbehave.forwardDropsConnection = false;
@@ -445,6 +479,13 @@ export interface FakeThread {
   forward_child?: number;
   /** Forward note rendered with the badge but without the child-conversation link. */
   forward?: boolean;
+  /** Author user id of a message/note (default: the logged-in user). Rendered as /users/profile/N, "you" when own. */
+  by?: number;
+  /**
+   * Override FreeScout's Delete menu item (default: rendered like thread.blade.php, for an own note that is not the
+   * first thread). true renders it even where FreeScout would not, to prove the MCP's own checks still refuse.
+   */
+  deletable?: boolean;
 }
 
 export interface FakeConv {
@@ -480,7 +521,12 @@ export function simConversationPage(base: string, token: string, id: number, c: 
         ? `<a href="${base}/customers/5/edit">Cust Omer</a>`
         : t.type === "draft"
           ? "you [Draft]"
-          : `<a href="${base}/users/profile/${userId}">you</a>`;
+          : (t.by ?? userId) === userId
+            ? `<a href="${base}/users/profile/${userId}">you</a>`
+            : `<a href="${base}/users/profile/${t.by}">Other Agent</a>`;
+    // thread.blade.php: Delete only for isNote() && !first && can('delete') (own note); forward notes are notes too.
+    const deletable = t.deletable ?? (t.type === "note" && (t.by ?? userId) === userId && t !== c.threads[0]);
+    const options = `<div class="dropdown thread-options"><ul class="dropdown-menu">${deletable ? `<li><a href="#" class="thread-delete-trigger" role="button">Delete</a></li>` : ""}<li><a href="#" class="new-conv">New Conversation</a></li></ul></div>`;
     const fwd =
       t.forward_child !== undefined || t.forward
         ? `<div class="thread-badge" title="Forward"><i class="glyphicon glyphicon-arrow-right"></i></div>`
@@ -490,7 +536,7 @@ export function simConversationPage(base: string, token: string, id: number, c: 
     const fwdAlert = t.forward_child !== undefined ? `<div class="alert alert-note">You forwarded this conversation. Forwarded conversation: <a href="${base}/conversation/${t.forward_child + 1000}">#${t.forward_child}</a></div>` : "";
     const recips = t.to?.length ? `<div class="thread-recipients"><div><strong>To:</strong> ${esc(t.to.join(", "))}</div></div>` : "";
     const content = t.type === "draft" ? `<div class="thread-body">${t.body}</div>` : `<div class="thread-body">${fwdAlert}<div class="thread-content">${t.body}</div></div>`;
-    return `<div class="thread thread-type-${t.type}" id="thread-${t.id}" data-thread_id="${t.id}"><div class="thread-message">${fwd}<div class="thread-header"><div class="thread-title"><div class="thread-person"><strong>${person}</strong></div>${recips}</div><div class="thread-info"><a href="#thread-${t.id}" class="thread-date" title="Oct 26, 2026 10:00">now</a></div></div>${content}</div></div>`;
+    return `<div class="thread thread-type-${t.type}" id="thread-${t.id}" data-thread_id="${t.id}"><div class="thread-message">${fwd}<div class="thread-header"><div class="thread-title"><div class="thread-person"><strong>${person}</strong></div>${recips}</div><div class="thread-info"><a href="#thread-${t.id}" class="thread-date" title="Oct 26, 2026 10:00">now</a></div></div>${content}</div>${options}</div>`;
   };
   const layoutClass = c.draft ? "conv-new" : "conv-type-email";
   const menus = c.draft

@@ -44,6 +44,11 @@ export interface ParsedThread {
   is_forward?: true;
   /** On a forward note: the `#number` of the new "Fwd:" conversation, when the page links it. */
   forwarded_conversation_number?: number;
+  /**
+   * Present (true) only when FreeScout itself offers "Delete" in this thread's menu (thread.blade.php renders
+   * `.thread-delete-trigger` for `isNote() && !first && can('delete')`, i.e. the logged-in user's own note).
+   */
+  can_delete?: true;
 }
 
 export interface ParsedConversation {
@@ -233,6 +238,9 @@ function parseThread(
     attachments,
   };
   if (type === "note") Object.assign(thread, forwardInfo($, el));
+  // FreeScout chrome only: the thread's own options menu (a direct child of the .thread div), never agent-written HTML.
+  const deleteTrigger = el.children(".thread-options").find("a.thread-delete-trigger").filter((_, n) => !$(n).closest(".thread-content").length);
+  if (deleteTrigger.length) thread.can_delete = true;
   return thread;
 }
 
