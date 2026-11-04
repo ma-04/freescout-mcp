@@ -30,7 +30,7 @@ afterEach(async () => {
 });
 
 describe("tool registry", () => {
-  it("registers exactly the read tools plus add_note/save_draft/discard_draft/add_tag/remove_tag/close_conversation; forward only with an allow-list", async () => {
+  it("registers exactly the read tools plus add_note/save_draft/discard_draft/add_tag/remove_tag/remove_note/close_conversation; forward only with an allow-list", async () => {
     const { mcp, close } = await connect(offline());
     cleanup = close;
     const { tools } = await mcp.listTools();
@@ -52,6 +52,7 @@ describe("tool registry", () => {
         "list_saved_replies",
         "list_tags",
         "productivity_report",
+        "remove_note",
         "remove_tag",
         "satisfaction_report",
         "save_draft",
@@ -84,7 +85,17 @@ describe("tool registry", () => {
     const tagTools = tools.filter((t) => /tag/i.test(t.name));
     expect(tagTools.map((t) => t.name).sort()).toEqual(["add_tag", "list_tags", "remove_tag"]);
     expect(tagTools.filter((t) => t.annotations?.readOnlyHint !== true).map((t) => t.name).sort()).toEqual(["add_tag", "remove_tag"]);
-    expect(tools.filter((t) => /remove|untag|delete/i.test(t.name)).map((t) => t.name)).toEqual(["remove_tag"]);
+    // remove_note (2026-11-04) deletes only the agent's own plain internal note; no other remove/delete tool exists.
+    expect(tools.filter((t) => /remove|untag|delete/i.test(t.name)).map((t) => t.name).sort()).toEqual(["remove_note", "remove_tag"]);
+    const removeNote = tools.find((t) => t.name === "remove_note")!;
+    expect(Object.keys(removeNote.inputSchema.properties ?? {}).sort()).toEqual(["conversation_id", "thread_id"]);
+    expect(removeNote.inputSchema.required?.slice().sort()).toEqual(["conversation_id", "thread_id"]);
+    expect(removeNote.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true });
+    expect(removeNote.description).toMatch(/INTERNAL NOTE that the logged-in agent wrote/);
+    expect(removeNote.description).toMatch(/never deletes customer messages/);
+    expect(removeNote.description).toMatch(/forward notes, notes written by\s+other users/);
+    expect(removeNote.description).toMatch(/get_conversation/);
+    expect(removeNote.description).toMatch(/Permissions are those/);
     const removeTag = tools.find((t) => t.name === "remove_tag")!;
     expect(Object.keys(removeTag.inputSchema.properties ?? {}).sort()).toEqual(["conversation_id", "tags"]);
     expect(removeTag.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: true, idempotentHint: true });
@@ -142,7 +153,7 @@ describe("tool registry", () => {
     expect(bad.isError).toBe(true);
   });
 
-  it("add_tag and remove_tag schemas reject bad arguments before any request", async () => {
+  it("add_tag, remove_tag and remove_note schemas reject bad arguments before any request", async () => {
     const client = offline();
     let calls = 0;
     client.getHtml = async () => {
@@ -164,6 +175,18 @@ describe("tool registry", () => {
       { conversation_id: 1, tags: "a" },
     ]) {
       for (const name of ["add_tag", "remove_tag"]) expect((await mcp.callTool({ name, arguments: args })).isError).toBe(true);
+    }
+    for (const args of [
+      { conversation_id: 1 },
+      { thread_id: 19 },
+      { conversation_id: 1, thread_id: 0 },
+      { conversation_id: 1, thread_id: -19 },
+      { conversation_id: 1, thread_id: 1.5 },
+      { conversation_id: 1, thread_id: "19" },
+      { conversation_id: 1, thread_id: [19, 20] },
+      { conversation_id: [1, 2], thread_id: 19 },
+    ]) {
+      expect((await mcp.callTool({ name: "remove_note", arguments: args })).isError, JSON.stringify(args)).toBe(true);
     }
     expect(calls).toBe(0);
   });

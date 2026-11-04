@@ -1456,6 +1456,127 @@ export async function discardDraft(port: FreeScoutPort, conversationId: number, 
 }
 
 // ---------------------------------------------------------------------------------------------
+// remove_note: delete ONE internal note written by the logged-in agent (§5.6). FreeScout's delete_thread takes only a
+// thread id (no conversation id), refuses non-notes and other users' notes itself, and hard-deletes the row. The MCP
+// refuses everything except the agent's own plain note on the named conversation before posting anything.
+
+/** The only form remove_note ever posts to /conversation/ajax. `_token` is added by Session.ajaxPost. */
+export type DeleteThreadForm = { action: "delete_thread"; thread_id: string };
+
+const DELETE_THREAD_FORM_KEYS = ["action", "thread_id"];
+
+/** Hard guard run right before the POST: exactly {action:'delete_thread', thread_id:'<one positive int>'}. */
+export function assertDeleteThreadForm(form: unknown): asserts form is DeleteThreadForm {
+  if (!isPlainObject(form)) throw new FreeScoutError("Refusing to send delete_thread form (not a plain object)");
+  const problems: string[] = [];
+  const keys = Object.keys(form);
+  for (const k of keys) if (!DELETE_THREAD_FORM_KEYS.includes(k)) problems.push(`unexpected field ${k}`);
+  for (const k of DELETE_THREAD_FORM_KEYS) if (!keys.includes(k)) problems.push(`${k} missing`);
+  if (form.action !== "delete_thread") problems.push("action is not 'delete_thread'");
+  if (typeof form.thread_id !== "string" || !/^[1-9]\d*$/.test(form.thread_id)) {
+    problems.push("thread_id is not a single positive integer string");
+  }
+  if (problems.length) throw new FreeScoutError(`Refusing to send delete_thread form (${problems.join(", ")})`);
+}
+
+export function buildDeleteThreadForm(threadId: number): DeleteThreadForm {
+  const form: DeleteThreadForm = { action: "delete_thread", thread_id: String(threadId) };
+  assertDeleteThreadForm(form);
+  return form;
+}
+
+export interface RemoveNoteResult {
+  conversation_id: number;
+  number: number | null;
+  thread_id: number;
+  removed: true;
+  /** Body of the deleted note as it was shown before deleting (FreeScout keeps no copy). */
+  body: string;
+  thread_count_before: number;
+  thread_count_after: number;
+}
+
+/**
+ * Throws unless thread `threadId` on `conv` is a plain internal note written by the logged-in user that FreeScout
+ * itself offers to delete. Every check is the MCP's own; FreeScout's checks (note only, own only) come on top.
+ */
+function requireOwnPlainNote(conv: ParsedConversation, threadId: number): ParsedThread {
+  const idx = conv.threads.findIndex((x) => x.thread_id === threadId);
+  const t = conv.threads[idx];
+  if (!t) {
+    throw new FreeScoutError(
+      `Thread ${threadId} is not on conversation ${conv.id} (wrong id, or already deleted). Nothing was changed. ` +
+        "Use get_conversation to see the thread ids.",
+    );
+  }
+  const refuse = (why: string) => new FreeScoutError(`Thread ${threadId} on conversation ${conv.id} ${why}; refusing to delete it. Nothing was changed.`);
+  if (t.type !== "note") {
+    const kind: Record<string, string> = {
+      customer: "is a customer message",
+      message: "is a reply sent to the customer",
+      draft: "is a reply draft (use discard_draft for drafts)",
+      lineitem: "is a status/assignee log line",
+      chat: "is a chat message",
+    };
+    throw refuse(t.type ? (kind[t.type] ?? `is a ${t.type} thread, not an internal note`) : "has an unknown type, not an internal note");
+  }
+  // FreeScout renders recipients on a note only when it is a forward (thread.blade.php), so `to` is a second signal.
+  if (t.is_forward || t.to.length > 0 || t.cc.length > 0) throw refuse("is a forward note (it records an email that was sent)");
+  if (conv.current_user_id === null) throw refuse("cannot be checked: the page does not show the logged-in user id");
+  if (!t.author || t.author.kind !== "user" || t.author.id === null || t.author.id !== conv.current_user_id || !t.author.is_current_user) {
+    const who = t.author?.name ? ` (author: ${t.author.name})` : "";
+    throw refuse(`was not written by the logged-in user${who}; only your own notes can be removed`);
+  }
+  if (idx === 0) throw refuse("is the first thread of the conversation (FreeScout never offers to delete it)");
+  if (!t.can_delete) throw refuse("is not offered for deletion by FreeScout (no Delete item in its menu for this user)");
+  return t;
+}
+
+/**
+ * Delete one internal note the logged-in agent wrote. Refuses (before any POST) customer messages, replies, drafts,
+ * log lines, forward notes, other users' notes, the first thread and notes FreeScout does not offer to delete. Then
+ * posts exactly {action:'delete_thread', thread_id} and re-reads the page: the note must be gone and every other
+ * thread still there.
+ */
+export async function removeNote(port: FreeScoutPort, conversationId: number, threadId: number): Promise<RemoveNoteResult> {
+  if (!isPosInt(threadId)) throw new FreeScoutError("thread_id must be a positive integer");
+  // Fresh page: thread list, authors, the logged-in user id and (via Session) a fresh CSRF token.
+  const before = await getConversation(port, conversationId);
+  refuseDraftConversation(before, "remove a note from");
+  const note = requireOwnPlainNote(before, threadId);
+  const others = before.threads.map((t) => t.thread_id).filter((x): x is number => x !== null && x !== threadId);
+
+  const form = buildDeleteThreadForm(threadId);
+  assertDeleteThreadForm(form);
+  checkAjax(await port.ajaxPost<AjaxEnvelope>(AJAX, form), "remove_note");
+
+  const after = await getConversation(port, conversationId);
+  const now = new Set(after.threads.map((t) => t.thread_id).filter((x): x is number => x !== null));
+  const vanished = others.filter((id) => !now.has(id));
+  if (vanished.length) {
+    throw new FreeScoutError(
+      `DANGER: after remove_note, conversation ${conversationId} also lost thread(s) ${vanished.join(", ")} that were not ` +
+        "asked to be removed; a human must check this conversation in FreeScout immediately.",
+    );
+  }
+  if (now.has(threadId)) {
+    throw new FreeScoutError(
+      `FreeScout accepted remove_note but thread ${threadId} is still shown on conversation ${conversationId} afterwards. ` +
+        "Check the conversation in the UI.",
+    );
+  }
+  return {
+    conversation_id: conversationId,
+    number: after.number,
+    thread_id: threadId,
+    removed: true,
+    body: note.body,
+    thread_count_before: before.threads.length,
+    thread_count_after: after.threads.length,
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
 // Close a conversation: conversation_change_status with status pinned to Closed (§5.4). There is no
 // reopen / pending / spam / assign code path: STATUS_CLOSED is the only status this module ever posts.
 

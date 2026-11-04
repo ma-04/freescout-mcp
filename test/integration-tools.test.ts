@@ -165,6 +165,22 @@ describe.skipIf(!enabled)("live tools as the restricted agent", () => {
     if (sshHost) expect(sql(`select count(*) from threads where id = ${d1.thread_id};`)).toEqual([["0"]]);
   }, 90_000);
 
+  it("remove_note deletes a note it just added on conversation 1; others' threads are refused; a repeat call fails cleanly", async () => {
+    const note = await ops.addNote(c, 1, `Integration note to remove ${Date.now()}`);
+    const mid = await ops.getConversation(c, 1);
+    expect(mid.threads.find((t) => t.thread_id === note.thread_id)).toMatchObject({ type: "note", can_delete: true, author: { is_current_user: true } });
+    const customer = mid.threads.find((t) => t.type === "customer" && t.thread_id !== null)!;
+    await expect(ops.removeNote(c, 1, customer.thread_id!)).rejects.toThrow(/customer message; refusing/);
+    const res = await ops.removeNote(c, 1, note.thread_id);
+    expect(res).toMatchObject({ conversation_id: 1, thread_id: note.thread_id, removed: true });
+    const end = await ops.getConversation(c, 1);
+    expect(end.threads.some((t) => t.thread_id === note.thread_id)).toBe(false);
+    expect(end.status_value).toBe(mid.status_value);
+    expect(end.assignee_id).toBe(mid.assignee_id);
+    await expect(ops.removeNote(c, 1, note.thread_id)).rejects.toThrow(/not on conversation 1/);
+    if (sshHost) expect(sql(`select count(*) from threads where id = ${note.thread_id};`)).toEqual([["0"]]);
+  }, 90_000);
+
   it("writes on Billing conversation 10 are refused", async () => {
     await expect(ops.addNote(c, 10, "should not work")).rejects.toBeInstanceOf(PermissionError);
     await expect(ops.saveDraft(c, 10, "should not work")).rejects.toBeInstanceOf(PermissionError);
