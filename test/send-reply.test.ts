@@ -9,7 +9,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FreeScoutClient, type FreeScoutPort } from "../src/client.js";
 import { loadBaseConfig } from "../src/config.js";
-import { FreeScoutError, PermissionError } from "../src/errors.js";
+import { AuthError, FreeScoutError, PermissionError } from "../src/errors.js";
 import { silentLogger } from "../src/log.js";
 import {
   assertForwardForm,
@@ -520,7 +520,7 @@ describe("sendReply: duplicate sends, edited drafts, mailbox and customer checks
     expect(fs.replies).toHaveLength(1);
     expect(sendActions()).toHaveLength(1);
     fs.addConv(8);
-    await expect(sendReply(portWith(client, () => fs.logoutAll()), 8, { body: "y" }, ON)).rejects.not.toThrow(/POSSIBLY SENT/);
+    await expect(sendReply(portWith(client, () => fs.logoutAll()), 8, { body: "y" }, ON)).rejects.toBeInstanceOf(AuthError);
     expect(fs.replies).toHaveLength(1);
   });
 
@@ -532,6 +532,7 @@ describe("sendReply: duplicate sends, edited drafts, mailbox and customer checks
     expect(c.status).toBe("fulfilled");
     expect(b.status).toBe("rejected");
     expect((b as PromiseRejectedResult).reason.message).toMatch(/^Another send_reply on conversation 9 is in progress\. Nothing was sent/);
+    expect(sendActions()).toHaveLength(2);
     expect(fs.replies.map((x) => [x.conversation_id, x.body]).sort()).toEqual([[8, "<p>other</p>"], [9, "<p>first</p>"]]);
     // Released after success and after a refusal.
     await expect(reply(9, { body: "third", status: "spam" as never })).rejects.toThrow(/status must be/);
