@@ -7,8 +7,9 @@
  * With FREESCOUT_DEMO_SSH set, the note test also checks the database over ssh (threads.type and
  * send_logs). It writes notes/drafts only on Support conversation 1.
  *
- * send_reply EMAILS THE CUSTOMER, so its live tests run only with an extra opt-in, FREESCOUT_REPLY_ENABLED=1, on top of
- * the variables above (demo only, never production). They reply on Support conversation 1; reseed afterwards
+ * send_reply EMAILS THE CUSTOMER, so its live tests run only with an extra test-only opt-in, FREESCOUT_REPLY_LIVE_TEST=1,
+ * on top of the variables above (demo only, never production). It is deliberately not the server's
+ * FREESCOUT_REPLY_ENABLED, so an operator who has replies enabled does not send email by running the note/draft tests. They reply on Support conversation 1; reseed afterwards
  * (demo/reset.sh), because the replies stay in the conversation.
  */
 import { execFileSync } from "node:child_process";
@@ -22,7 +23,7 @@ import * as stats from "../src/stats.js";
 
 const { FREESCOUT_URL: url, FREESCOUT_USER: user, FREESCOUT_PASSWORD: password, FREESCOUT_DEMO_SSH: sshHost } = process.env;
 const enabled = Boolean(url && user && password);
-const replyLive = enabled && process.env.FREESCOUT_REPLY_ENABLED === "1";
+const replyLive = enabled && process.env.FREESCOUT_REPLY_LIVE_TEST === "1";
 
 /** Run SQL in the demo DB container; the password is read from the server's .env, never sent from here. */
 function sql(query: string): string[][] {

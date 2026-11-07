@@ -374,7 +374,8 @@ exercised live by this MCP (the user runs the live test).
 - Email: `UserReplied` (1313) → the `SendReplyToCustomer` listener queues a `SendReplyToCustomer` job delayed by
   `Conversation::UNDO_TIMOUT` = **15 s** (`conversation.send_reply_to_customer_delay` filter). `undoReply()`
   (`GET /conversation/undo-reply/{thread_id}/{token}`, own reply, within 15 s) turns the thread back into a draft and
-  deletes the queued job. The MCP never calls it.
+  deletes the queued job. The link exists only in the sending session's flash message (it carries that session's CSRF
+token), so a reply sent by the MCP cannot be undone from a human's browser. The MCP never calls it.
 - **No duplicate check**: "You've already sent this message just recently." exists only in `save_draft` (1488, last
   thread by the same user with an identical body). Two identical `send_reply` POSTs send two emails.
 - Response: `{"status":"success","msg":"","redirect_url":"…"}`; the thread id is not returned. Errors (HTTP 200,

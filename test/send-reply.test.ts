@@ -7,7 +7,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { FreeScoutClient } from "../src/client.js";
+import { FreeScoutClient, type FreeScoutPort } from "../src/client.js";
 import { loadBaseConfig } from "../src/config.js";
 import { FreeScoutError, PermissionError } from "../src/errors.js";
 import { silentLogger } from "../src/log.js";
@@ -281,6 +281,23 @@ describe("sendReply: draft publish (fake FreeScout)", () => {
       const before = fs.convPosts.length;
       await expect(reply(id, { draftThreadId: draftOf(id) }), msg.source).rejects.toThrow(msg);
       expect(fs.convPosts.slice(before).map((p) => p.find(([k]) => k === "action")?.[1])).toEqual(["load_draft"]);
+    }
+    expect(actions().every((a) => a === "load_draft")).toBe(true);
+    expect(fs.replies).toEqual([]);
+  });
+
+  it("load_draft answers missing is_forward or attachments are refused (fail closed)", async () => {
+    withDraft(9);
+    for (const [strip, msg] of [["is_forward", /is a forward draft/], ["attachments", /did not say whether draft 50 has attachments/], ["to", /addressed to nobody/]] as const) {
+      const port: FreeScoutPort = {
+        getHtml: (path) => client.getHtml(path),
+        async ajaxPost<T>(path: string, form: Record<string, unknown>): Promise<T> {
+          const r = await client.ajaxPost<{ data?: Record<string, unknown> }>(path, form as Record<string, string>);
+          if (form.action === "load_draft" && r.data) delete r.data[strip];
+          return r as T;
+        },
+      };
+      await expect(sendReply(port, 9, { draftThreadId: 50 }, ON), strip).rejects.toThrow(msg);
     }
     expect(actions().every((a) => a === "load_draft")).toBe(true);
     expect(fs.replies).toEqual([]);

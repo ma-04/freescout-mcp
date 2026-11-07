@@ -2121,8 +2121,9 @@ async function loadDraft(port: FreeScoutPort, threadId: number): Promise<StoredD
     cc,
     bcc,
     body: typeof d.body === "string" ? d.body : "",
-    is_forward: d.is_forward !== 0 && d.is_forward !== "0" && d.is_forward !== false && d.is_forward != null,
-    attachments: Array.isArray(d.attachments) ? d.attachments.length : d.attachments == null ? 0 : 1,
+    // Fail closed: only an explicit 0 means "not a forward", only an empty array means "no attachments".
+    is_forward: !(d.is_forward === 0 || d.is_forward === "0" || d.is_forward === false),
+    attachments: Array.isArray(d.attachments) ? d.attachments.length : -1,
   };
 }
 
@@ -2146,8 +2147,8 @@ export interface ReplyResult {
 }
 
 export const REPLY_UNDO_NOTE =
-  "FreeScout holds the email for about 15 seconds before sending; until then a human can press Undo in the FreeScout " +
-  "UI. After that it cannot be taken back.";
+  "FreeScout queues the email for about 15 seconds before sending. Its Undo link is shown only to the session that " +
+  "sent the reply (this server's), not in a human's browser, so treat the reply as sent; it cannot be taken back.";
 
 function replyPossiblySent(to: string, conversationId: number, cause: unknown): FreeScoutError {
   const msg = cause instanceof Error ? cause.message : String(cause);
@@ -2261,7 +2262,13 @@ export async function sendReply(port: FreeScoutPort, conversationId: number, opt
     if (stored.cc.length || stored.bcc.length) {
       throw refuse(`draft ${draftId} has CC/BCC recipients (${[...stored.cc, ...stored.bcc].join(", ")}); this server only replies to the customer`);
     }
-    if (stored.attachments) throw refuse(`draft ${draftId} has attachments; this server does not send attachments. Send it from the FreeScout UI`);
+    if (stored.attachments !== 0) {
+      throw refuse(
+        stored.attachments > 0
+          ? `draft ${draftId} has attachments; this server does not send attachments. Send it from the FreeScout UI`
+          : `load_draft did not say whether draft ${draftId} has attachments`,
+      );
+    }
     if (!stored.body.trim()) throw refuse(`draft ${draftId} is empty`);
     // FreeScout publishes the POSTED body, so the stored HTML is re-posted verbatim: what is sent is the draft as saved.
     body = stored.body;
@@ -2313,7 +2320,7 @@ export async function sendReply(port: FreeScoutPort, conversationId: number, opt
   const danger = (what: string) =>
     new FreeScoutError(
       `DANGER: after send_reply on conversation ${conversationId}, ${what}. The reply was probably sent: do NOT retry. ` +
-        "A human must check this conversation in FreeScout immediately (FreeScout allows undoing a send for about 15 seconds).",
+        "A human must check this conversation in FreeScout immediately (FreeScout sends the email about 15 seconds after the POST).",
     );
   const fresh = after.threads.filter((t) => t.thread_id !== null && !known.has(t.thread_id) && t.type !== "lineitem" && t.type !== "customer");
   let reply: ParsedThread | undefined;
