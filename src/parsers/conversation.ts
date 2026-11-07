@@ -164,7 +164,9 @@ function parseThread(
   const typeClass = classes.find((c) => c.startsWith("thread-type-"))?.slice("thread-type-".length) ?? "";
   const type = (THREAD_TYPES as readonly string[]).includes(typeClass) ? (typeClass as ThreadType) : null;
   const threadId = intOrNull(el.attr("data-thread_id")) ?? intOrNull(/^thread-(\d+)$/.exec(el.attr("id") ?? "")?.[1]);
-  const dateA = el.find("a.thread-date").first();
+  // FreeScout chrome (author, date, status, recipients) is outside .thread-body; message HTML inside it may imitate it.
+  const chrome = (sel: string) => el.find(sel).filter((_, n) => !$(n).closest(".thread-body").length);
+  const dateA = chrome("a.thread-date").first();
 
   let author: ThreadAuthor | null = null;
   let bodyText: string;
@@ -175,7 +177,7 @@ function parseThread(
     if (a.length) author = { kind: "user", id: uid, name: textOrNull(a.text()), is_current_user: uid !== null && uid === currentUserId };
     bodyText = squish(el.find(".thread-title").first().text());
   } else {
-    const person = el.find(".thread-person strong").first();
+    const person = chrome(".thread-person strong").first();
     const a = person.find("a").first();
     const href = a.attr("href");
     const raw = textOrNull((a.length ? a : person).text());
@@ -202,9 +204,11 @@ function parseThread(
     bodyText = htmlToText(bodyEl);
   }
 
+  // FreeScout's own To/Cc block sits in .thread-header; a draft's HTML sits straight in .thread-body, a published
+  // thread's in .thread-content, and either may imitate it.
   const recipients = (label: string): string[] => {
     const out: string[] = [];
-    el.find(".thread-recipients > div").each((_, d) => {
+    chrome(".thread-recipients > div").each((_, d) => {
       const t = squish($(d).text());
       const m = new RegExp(`^${label}:\\s*(.+)$`, "i").exec(t);
       if (m) out.push(...m[1]!.split(/\s*,\s*/).filter(Boolean));
@@ -233,7 +237,7 @@ function parseThread(
     date_relative: textOrNull(dateA.text()),
     to: recipients("To"),
     cc: recipients("Cc"),
-    status_snapshot: textOrNull(el.find(".thread-status").first().text()),
+    status_snapshot: textOrNull(chrome(".thread-status").first().text()),
     body: bodyText,
     attachments,
   };
