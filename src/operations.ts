@@ -2141,7 +2141,7 @@ export interface ReplyResult {
   /** The reply as the re-read page shows it (plain text). */
   body: string;
   undo_note: string;
-  /** Set (true) only when a status/assignee change was logged during the call; see concurrentChangeWarning. */
+  /** Set (true) only when a status/assignee change was logged during the call (the teammate's change was probably reverted). */
   concurrent_change_detected?: true;
   warning?: string;
 }
@@ -2185,16 +2185,41 @@ export interface SendReplyOptions {
 }
 
 /**
- * Email a reply to the conversation's customer. Refuses before any POST: gate off, both or neither of body/draft,
- * an invalid status, an unsent draft conversation, a Spam or non-email conversation, a mailbox outside
- * FREESCOUT_REPLY_MAILBOXES (mailbox from the page), no customer email on the page, a reply form preset to another
- * address; on the draft path also a thread that is not the agent's own reply draft on this conversation, and (after the
- * read-only load_draft) a forward draft, stored recipients other than exactly the customer, attachments or an empty body.
- * Then one pinned POST; afterwards the page is re-read and anything but the expected single published reply is DANGER.
+ * Email a reply to the conversation's customer. Refuses before any POST: gate off, another send_reply on the same
+ * conversation in flight, both or neither of body/draft, an invalid status, an unsent draft conversation, a Spam or
+ * non-email conversation, two different mailbox ids on the page or a mailbox outside FREESCOUT_REPLY_MAILBOXES, no
+ * customer email on the page, a reply form preset to another address; on the new-reply path a body equal to our own
+ * newest reply (likely duplicate); on the draft path a thread that is not the agent's own reply draft on this
+ * conversation, and (after the read-only load_draft) a forward draft, stored recipients other than exactly the
+ * customer, attachments, an empty body or a stored body that differs from the one the page shows.
+ * Then one pinned POST; afterwards the page is re-read and anything but the expected single published reply (to the
+ * same customer email) is DANGER.
  */
 export async function sendReply(port: FreeScoutPort, conversationId: number, opts: SendReplyOptions, gate: ReplyGate): Promise<ReplyResult> {
   if (!gate.enabled) throw new FreeScoutError("send_reply is disabled on this server (FREESCOUT_REPLY_ENABLED is not set)");
   if (!isPosInt(conversationId)) throw new FreeScoutError("conversation_id must be a positive integer");
+  // Taken synchronously (before the first await), so two overlapping calls can never both reach the POST.
+  if (REPLY_IN_FLIGHT.has(conversationId)) {
+    throw new FreeScoutError(
+      `Another send_reply on conversation ${conversationId} is in progress. Nothing was sent by this call. Wait for that ` +
+        "call's result and do not send again unless the human asks.",
+    );
+  }
+  REPLY_IN_FLIGHT.add(conversationId);
+  try {
+    return await sendReplyUnlocked(port, conversationId, opts, gate);
+  } finally {
+    REPLY_IN_FLIGHT.delete(conversationId);
+  }
+}
+
+/**
+ * Conversations with a send_reply in flight in this process (all sessions: one process talks to one FreeScout, and
+ * two sessions replying to the same conversation at once is as much a duplicate as one session doing it twice).
+ */
+const REPLY_IN_FLIGHT = new Set<number>();
+
+async function sendReplyUnlocked(port: FreeScoutPort, conversationId: number, opts: SendReplyOptions, gate: ReplyGate): Promise<ReplyResult> {
   const hasBody = typeof opts.body === "string" && opts.body.trim() !== "";
   const hasDraft = opts.draftThreadId !== undefined && opts.draftThreadId !== null;
   if (hasBody === hasDraft) {
@@ -2221,6 +2246,11 @@ export async function sendReply(port: FreeScoutPort, conversationId: number, opt
       `it is ${before.type ? `a ${before.type}` : "not an email"} conversation (FreeScout converts phone conversations to email on reply ` +
         "and sends chat replies without an undo window); reply from the FreeScout UI",
     );
+  }
+  // view.blade.php prints the mailbox twice: body[data-mailbox_id] (parsed) and #conv-list-col[data-mailbox_id].
+  const listMailbox = page.$("#conv-list-col").first().attr("data-mailbox_id");
+  if (listMailbox !== undefined && listMailbox.trim() !== String(cur.mailbox_id)) {
+    throw refuse(`the page shows two different mailbox ids (${cur.mailbox_id} and ${JSON.stringify(listMailbox)}), so the mailbox cannot be confirmed`);
   }
   if (!replyMailboxAllowed(gate, cur.mailbox_id)) {
     throw refuse(
@@ -2270,10 +2300,26 @@ export async function sendReply(port: FreeScoutPort, conversationId: number, opt
       );
     }
     if (!stored.body.trim()) throw refuse(`draft ${draftId} is empty`);
+    // The "you" check above was made on the page; the text sent is the one stored now. If they differ, someone (a
+    // teammate) edited the draft in between, and what would go out is not what was checked or approved.
+    if (squish(htmlToText(stored.body)) !== squish(t.body)) {
+      throw refuse(
+        `the stored text of draft ${draftId} differs from the text the conversation page shows (it was probably edited in ` +
+          "between); re-read the conversation and ask the human to confirm the draft",
+      );
+    }
     // FreeScout publishes the POSTED body, so the stored HTML is re-posted verbatim: what is sent is the draft as saved.
     body = stored.body;
   } else {
     body = newBody!;
+    // FreeScout has no duplicate check for replies. The same text as our newest sent reply is almost always a retry.
+    const last = [...before.threads].reverse().find((t) => t.type !== "lineitem" && t.type !== "draft");
+    if (last?.type === "message" && last.author?.kind === "user" && last.author.is_current_user && squish(last.body) === squish(htmlToText(body))) {
+      throw refuse(
+        `the newest reply on this conversation (thread ${last.thread_id}) is already yours with the same text, so this looks ` +
+          "like a duplicate. Do not send it again unless the human confirms they want the customer to get it twice",
+      );
+    }
   }
 
   const known = new Set(before.threads.map((t) => t.thread_id).filter((x): x is number => x !== null));
@@ -2359,6 +2405,13 @@ export async function sendReply(port: FreeScoutPort, conversationId: number, opt
     throw danger(`the reply (thread ${reply.thread_id}) is addressed to ${reply.to.join(", ")}, not only ${customerEmail}`);
   }
   if (reply.cc.length) throw danger(`the reply (thread ${reply.thread_id}) has CC recipients ${reply.cc.join(", ")}`);
+  // sent_to is what the page showed before the POST; FreeScout used customer_email as it was when the POST ran.
+  if (!sameEmail(after.customer?.email, customerEmail)) {
+    throw danger(
+      `the conversation's customer email is now ${after.customer?.email ?? "not shown"}, not ${customerEmail} (it changed during the ` +
+        "call), so the reply may have gone to another address",
+    );
+  }
   const changed: string[] = [];
   if (after.status_value !== status) changed.push(`status is ${after.status_value}, expected ${status}`);
   if (after.assignee_id !== before.assignee_id) changed.push(`assignee ${before.assignee_id} -> ${after.assignee_id}`);
@@ -2387,7 +2440,11 @@ export async function sendReply(port: FreeScoutPort, conversationId: number, opt
   // one means a teammate changed status/assignee meanwhile. Not an error: the email is out; an error invites a retry.
   if (lineitemCount(after) > lineitemsBefore) {
     result.concurrent_change_detected = true;
-    warnings.push(concurrentChangeWarning(conversationId, "reply"));
+    warnings.push(
+      `Someone else changed the status or assignee of conversation ${conversationId} while this reply was being sent. ` +
+        "The reply carried the status and assignee read beforehand, which FreeScout applies as sent, so their change was " +
+        `probably reverted. Ask the human to re-check the status and assignee of conversation ${conversationId} in FreeScout.`,
+    );
   }
   if (warnings.length) result.warning = warnings.join(" ");
   return result;

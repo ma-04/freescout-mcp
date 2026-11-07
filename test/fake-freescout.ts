@@ -126,6 +126,8 @@ export class FakeFreeScout {
     replyDropsConnection?: boolean;
     /** One-shot: the next conversation page GET after a recorded reply answers HTTP 502. */
     rereadFailsAfterReply?: boolean;
+    /** A reply also changes the conversation's customer email to this (a teammate changed the customer mid-call). */
+    replyChangesCustomer?: string;
     /** delete_thread also deletes this other thread id (from whichever simulated conversation has it). */
     deleteAlsoRemoves?: number;
   } = {};
@@ -215,6 +217,11 @@ export class FakeFreeScout {
   rotateTokenFor(cookieValue: string): void {
     const sid = this.cookieToSid.get(cookieValue);
     if (sid) this.sessions.get(sid)!.token = rand();
+  }
+
+  /** Log every session out (as an expired Laravel session would be). */
+  logoutAll(): void {
+    for (const s of this.sessions.values()) s.authed = false;
   }
 
   rotateAllTokens(): void {
@@ -392,6 +399,7 @@ export class FakeFreeScout {
     conv.assignee_id = userId === -1 ? -1 : userId || conv.assignee_id;
     if (m.replyReassigns !== undefined) conv.assignee_id = m.replyReassigns;
     if (m.replyChangesStatus !== undefined) conv.status = m.replyChangesStatus;
+    if (m.replyChangesCustomer !== undefined) conv.customer_email = m.replyChangesCustomer;
     const by = m.replyAuthor ?? this.postUserId;
     const shown = { to: [m.replyShowsTo ?? to], cc: m.replyShowsCc ?? cc };
     let thread: FakeThread;
@@ -631,6 +639,8 @@ export interface FakeConv {
   type?: string;
   /** Reply form To select (view.blade.php renders it when the customer has several addresses): [email, selected]. */
   reply_to_options?: Array<[string, boolean]>;
+  /** #conv-list-col[data-mailbox_id] (view.blade.php); default mailbox_id, null = not rendered. */
+  list_mailbox_id?: number | string | null;
   /** Reply form Cc preset (the conversation's remembered CC list). */
   cc_preset?: string[];
   threads: FakeThread[];
@@ -694,6 +704,7 @@ export function simConversationPage(base: string, token: string, id: number, c: 
       `<div id="conv-status"><span class="conv-info-val"><span>${STATUS_NAMES[c.status]}</span></span><ul class="dropdown-menu conv-status">${statusItems}</ul></div>`;
   return `<!DOCTYPE html><html><head><meta name="csrf-token" content="${token}"></head>
 <body data-auth_user_id="${userId}" data-conversation_id="${id}" data-mailbox_id="${c.mailbox_id}"><span class="nav-user">Agnes</span>
+${c.list_mailbox_id === null ? "" : `<div id="conv-list-col" data-mailbox_id="${esc(String(c.list_mailbox_id ?? c.mailbox_id))}" data-conversation_id="${id}"></div>`}
 <div id="conv-layout" class="${layoutClass}"><div id="conv-toolbar">${menus}</div>
 <div id="conv-subject"><div class="conv-numnav"># <strong>${c.number}</strong></div><div class="conv-subjtext"><span>Fake subject ${id}</span></div></div>
 ${c.no_customer_panel ? "" : `<div id="conv-layout-customer"><div class="customer-snippet"><a href="${base}/customers/5/edit" class="customer-name">Cust Omer</a>
