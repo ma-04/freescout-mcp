@@ -207,3 +207,17 @@ Replying to customers, changing assignee, reopening or marking spam, attachments
 ## What next
 Candidate next rounds (assign/pending/reopen, more reports, Slack digests) are listed with effort and risk in
 `docs/ROADMAP.md` (2026-10-28). None is started.
+
+Scope update (2026-11-07, user): **customer replies, gated** (`send_reply`). This reverses the "no reply tool" rule,
+behind server-side configuration only. Decisions from the planning questions:
+
+| Topic | Decision |
+|---|---|
+| Gate | `FREESCOUT_REPLY_ENABLED=1` (exactly `1` or `true`) is required; the tool is not registered otherwise. Optional `FREESCOUT_REPLY_MAILBOXES` (comma/space-separated positive mailbox ids) narrows it; replies on other mailboxes are refused before any POST. Malformed values stop the server at startup. `MAILBOXES` without `ENABLED` = tool absent + startup warning. Server environment only: no tool argument or HTTP header can set or widen it. Logged at startup. |
+| Tool shape | `send_reply(conversation_id, body?, draft_thread_id?, status?)`. Exactly one of `body` (compose and send a new reply) or `draft_thread_id` (send an existing draft unchanged; the save_draft → human approves → send flow). The model cannot swap a draft's body at send time. |
+| Recipient | Always the conversation's customer (primary email). No to/cc/bcc parameters; nothing is posted for them. Draft path refuses drafts whose stored recipients are not exactly the customer, or that are forward drafts. |
+| Own drafts | Draft path only sends drafts written by the logged-in agent (consistent with `remove_note`). |
+| Status | Optional `active` / `pending` / `closed` (1/2/3, never spam); omitted = current status kept. Assignee always sent unchanged. |
+| Refusals | Spam conversations, unsent draft conversations, mailboxes outside the list, empty customer email. Mailbox id comes from the page, never the caller. |
+| Safety | Pinned form + `assertReplyForm` (exact keys; never `is_note`, `subtype`, `is_create`, `to`, `to_email`, `cc`, `bcc`); after-state re-read (new reply: exactly one new `message` thread; draft: same thread flipped draft → message, thread count unchanged); `POSSIBLY SENT:` semantics as forward; concurrent-change warning. |
+| Testing | Unit + red-team on the fake server; live send on the demo as the restricted agent, verified via DB (`threads.type=2`, `send_logs` to customer only); demo reseeded afterwards. PR only: no merge, no hosted deploy. |
