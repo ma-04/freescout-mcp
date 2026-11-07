@@ -17,7 +17,7 @@ export interface ReplyGate {
 export const REPLY_DISABLED: ReplyGate = Object.freeze({ enabled: false, mailboxes: [] as number[] }) as ReplyGate;
 
 /**
- * Parse the two variables. Unset/empty ENABLED = off. Any other value than `1` / `true` (case-insensitive) throws, so a
+ * Parse the two variables. Unset/empty/`0`/`false` ENABLED = off. Any other value than `1` / `true` (case-insensitive) throws, so a
  * typo such as `yes` or `on` cannot be mistaken for either state. MAILBOXES: comma- and/or space-separated positive
  * integers, de-duplicated; anything else (`*`, `all`, `0`, `-1`, `1.5`, names) throws. MAILBOXES without ENABLED leaves
  * the tool off and returns a warning.
@@ -25,7 +25,7 @@ export const REPLY_DISABLED: ReplyGate = Object.freeze({ enabled: false, mailbox
 export function parseReplyGate(env: { FREESCOUT_REPLY_ENABLED?: string; FREESCOUT_REPLY_MAILBOXES?: string }): ReplyGate {
   const rawEnabled = (env.FREESCOUT_REPLY_ENABLED ?? "").trim();
   let enabled = false;
-  if (rawEnabled) {
+  if (rawEnabled && !/^(0|false)$/i.test(rawEnabled)) {
     if (!/^(1|true)$/i.test(rawEnabled)) {
       throw new Error(
         `FREESCOUT_REPLY_ENABLED: invalid value ${JSON.stringify(rawEnabled)}. Set it to 1 (or true) to enable send_reply, ` +

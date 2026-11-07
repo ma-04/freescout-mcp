@@ -42,7 +42,7 @@ All configuration comes from environment variables (see `.env.example`):
 | `FREESCOUT_ALLOW_INSECURE` | no | Set to `1` to allow a plain `http://` URL to a host other than `localhost`/`127.0.0.1`. Without it the server refuses to start, because the cookie and password would travel unencrypted |
 | `FREESCOUT_LOG_LEVEL` | no | `debug`/`info`/`warn`/`error` (stderr), default `info` |
 | `FREESCOUT_FORWARD_ALLOW` | no | Enables `forward_conversation`. Comma- or space-separated exact addresses (`ops@example.com`) and/or domains (`@example.com`, that exact domain only, no subdomains). Unset or empty: the tool is not registered at all. A malformed entry stops the server at startup. See [Forwarding](#security-model) |
-| `FREESCOUT_REPLY_ENABLED` | no | Set to `1` (or `true`) to enable `send_reply`, which **emails the customer**. Unset or empty: the tool is not registered at all. Any other value stops the server at startup. See [Customer replies](#security-model) |
+| `FREESCOUT_REPLY_ENABLED` | no | Set to `1` (or `true`) to enable `send_reply`, which **emails the customer**. Unset, empty, `0` or `false`: the tool is not registered at all. Any other value stops the server at startup. See [Customer replies](#security-model) |
 | `FREESCOUT_REPLY_MAILBOXES` | no | Only with `FREESCOUT_REPLY_ENABLED`: comma- or space-separated mailbox ids replies are limited to (e.g. `1,3`). Unset: every mailbox the account can reply in. A malformed entry (`*`, `all`, names) stops the server at startup; set without `FREESCOUT_REPLY_ENABLED` it only logs a warning |
 
 You can set both: the cookie is used first, and the credentials are used only when the

@@ -68,11 +68,11 @@ function withDraft(id = 9, extra: Partial<Parameters<FakeFreeScout["addConv"]>[1
 describe("FREESCOUT_REPLY_ENABLED / FREESCOUT_REPLY_MAILBOXES", () => {
   it("enabled only by exactly 1 or true (case-insensitive); unset/empty = off", () => {
     for (const v of ["1", "true", "TRUE", " True "]) expect(parseReplyGate({ FREESCOUT_REPLY_ENABLED: v }).enabled, v).toBe(true);
-    for (const v of [undefined, "", "  "]) expect(parseReplyGate({ FREESCOUT_REPLY_ENABLED: v })).toEqual({ enabled: false, mailboxes: [] });
+    for (const v of [undefined, "", "  ", "0", "false", "FALSE"]) expect(parseReplyGate({ FREESCOUT_REPLY_ENABLED: v })).toEqual({ enabled: false, mailboxes: [] });
   });
 
   it("any other non-empty value stops the server", () => {
-    for (const v of ["0", "false", "yes", "on", "enabled", "11", "1,", "t", "true1", "*"]) {
+    for (const v of ["yes", "on", "enabled", "11", "1,", "t", "true1", "*"]) {
       expect(() => parseReplyGate({ FREESCOUT_REPLY_ENABLED: v }), v).toThrow(/FREESCOUT_REPLY_ENABLED: invalid value/);
     }
   });
