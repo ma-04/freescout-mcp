@@ -8,7 +8,7 @@ Layout on the server:
 
 ```
 ~/freescout-mcp/
-  .env                 chmod 600: MCP_TOKEN, FREESCOUT_URL, BIND_IP, MCP_PORT, optional FREESCOUT_FORWARD_ALLOW (see .env.example)
+  .env                 chmod 600: MCP_TOKEN, FREESCOUT_URL, BIND_IP, MCP_PORT, optional FREESCOUT_FORWARD_ALLOW, FREESCOUT_REPLY_ENABLED/_MAILBOXES (see .env.example)
   docker-compose.yml   copy of deploy/docker-compose.yml
   src-tree/            rsync'd working tree (no .git, node_modules, dist, .env*); the image is built from it
 ```
@@ -142,6 +142,9 @@ redacted tool errors, never cookies, passwords or the bearer token. Set `FREESCO
 - The bearer token and the identity headers travel as plain HTTP inside the tailnet; WireGuard encrypts them on
   the wire. Do not publish the port on any other interface.
 - The container runs as `node`, with a read-only root filesystem, no capabilities and `no-new-privileges`.
-- `FREESCOUT_FORWARD_ALLOW` in `.env` (optional, see `.env.example`) gates `forward_conversation`, the only tool that
-  emails someone: unset, the tool is not registered; set, every session can forward only to those addresses/domains.
+- `FREESCOUT_FORWARD_ALLOW` in `.env` (optional, see `.env.example`) gates `forward_conversation`, which emails an
+  internal recipient: unset, the tool is not registered; set, every session can forward only to those addresses/domains.
   Clients cannot change it. The container log says at startup whether forwarding is enabled and for which entries.
+- `FREESCOUT_REPLY_ENABLED=1` in `.env` (optional) registers `send_reply` for every session, which emails the
+  conversation's customer; `FREESCOUT_REPLY_MAILBOXES` limits it to some mailbox ids. Unset, the tool does not exist.
+  Clients cannot change either; the container log says at startup whether replies are enabled and for which mailboxes.
