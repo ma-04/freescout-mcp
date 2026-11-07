@@ -234,6 +234,35 @@ describe("HTTP transport: sessions", () => {
     expect(fs.convPosts).toEqual([]);
   });
 
+  it("send_reply exists only when the server was started with the reply gate; no header can enable or widen it", async () => {
+    const hdr = {
+      "X-FreeScout-Cookie": fs.mintLoggedInCookie(),
+      "X-FreeScout-Reply-Enabled": "1",
+      "X-Reply-Enabled": "true",
+      "X-FreeScout-Reply-Mailboxes": "1,2,3",
+      "FREESCOUT_REPLY_ENABLED": "1",
+    };
+    let names = (await (await connect(hdr)).client.listTools()).tools.map((t) => t.name);
+    expect(names).not.toContain("send_reply");
+
+    await app.close();
+    await start({ reply: { enabled: false, mailboxes: [1] } });
+    names = (await (await connect(hdr)).client.listTools()).tools.map((t) => t.name);
+    expect(names).not.toContain("send_reply");
+
+    await app.close();
+    await start({ reply: { enabled: true, mailboxes: [2] } });
+    const { client } = await connect(hdr);
+    names = (await client.listTools()).tools.map((t) => t.name);
+    expect(names).toContain("send_reply");
+    fs.addConv(9); // mailbox 1: outside the server's list, whatever the headers say
+    const r = await client.callTool({ name: "send_reply", arguments: { conversation_id: 9, body: "x" } });
+    expect(r.isError).toBe(true);
+    expect(text(r)).toMatch(/mailbox \(id 1\) is not in this server's FREESCOUT_REPLY_MAILBOXES \(2\)/);
+    expect(fs.convPosts).toEqual([]);
+    expect(fs.replies).toEqual([]);
+  });
+
   it("isolates sessions: two cookies, two users, two jars", async () => {
     const a = await connect({ "X-FreeScout-Cookie": fs.mintLoggedInCookie(101) });
     const b = await connect({ "X-FreeScout-Cookie": fs.mintLoggedInCookie(202) });

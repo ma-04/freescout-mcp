@@ -59,6 +59,11 @@ export class FakeFreeScout {
   convPosts: Array<Array<[string, string]>> = [];
   /** Recipients of forwards, per conversation, as FreeScout received them (to_email[] values). */
   forwards: Array<{ conversation_id: number; to: string[] }> = [];
+  /**
+   * Customer replies FreeScout accepted (send_reply without is_note/subtype), i.e. emails that would be queued: the
+   * recipient FreeScout uses (posted `to`, else the conversation's customer_email), the posted cc/bcc and body.
+   */
+  replies: Array<{ conversation_id: number; thread_id: number; to: string; cc: string[]; bcc: string[]; body: string; from_draft: boolean }> = [];
   /** Misbehaviour switches, to exercise the DANGER / post-verification checks. */
   misbehave: {
     statusAddsMessage?: boolean;
@@ -90,6 +95,39 @@ export class FakeFreeScout {
     teammate?: (conv: FakeConv) => void;
     /** delete_thread answers success but deletes nothing. */
     deleteNoop?: boolean;
+    /** A customer reply answers success but nothing is stored or sent. */
+    replyNoop?: boolean;
+    /** A customer reply is stored as an internal note instead (and nothing is emailed). */
+    replyAddsNote?: boolean;
+    /** A customer reply creates two message threads. */
+    replyAddsTwo?: boolean;
+    /** Publishing a draft creates a new message thread and leaves the draft as it was. */
+    replyDraftCreatesNew?: boolean;
+    /** Publishing a draft answers success but the draft stays a draft (nothing sent). */
+    replyLeavesDraft?: boolean;
+    /** A reply also assigns the conversation to this user id. */
+    replyReassigns?: number;
+    /** A reply also sets this status. */
+    replyChangesStatus?: number;
+    /** The stored reply thread shows this To address instead of the customer. */
+    replyShowsTo?: string;
+    /** The stored reply thread shows these CC addresses. */
+    replyShowsCc?: string[];
+    /** The stored reply thread is shown as written by this other user id. */
+    replyAuthor?: number;
+    /** A reply also deletes this other thread id. */
+    replyAlsoRemoves?: number;
+    /**
+     * Envelope answered for a customer reply. status "error": answered without processing; anything else: the reply is
+     * processed (recorded) and this is answered instead of the normal success.
+     */
+    replyAnswer?: unknown;
+    /** Record the reply, then drop the connection without answering. */
+    replyDropsConnection?: boolean;
+    /** One-shot: the next conversation page GET after a recorded reply answers HTTP 502. */
+    rereadFailsAfterReply?: boolean;
+    /** A reply also changes the conversation's customer email to this (a teammate changed the customer mid-call). */
+    replyChangesCustomer?: string;
     /** delete_thread also deletes this other thread id (from whichever simulated conversation has it). */
     deleteAlsoRemoves?: number;
   } = {};
@@ -181,6 +219,11 @@ export class FakeFreeScout {
     if (sid) this.sessions.get(sid)!.token = rand();
   }
 
+  /** Log every session out (as an expired Laravel session would be). */
+  logoutAll(): void {
+    for (const s of this.sessions.values()) s.authed = false;
+  }
+
   rotateAllTokens(): void {
     for (const s of this.sessions.values()) s.token = rand();
   }
@@ -247,6 +290,7 @@ export class FakeFreeScout {
   private convAjax(form: URLSearchParams): [number, unknown] | null {
     const action = form.get("action");
     if (action === "delete_thread") return this.deleteThread(form);
+    if (action === "load_draft") return this.loadDraft(form);
     if (action !== "conversation_change_status" && action !== "send_reply") return null;
     const id = Number(form.get("conversation_id"));
     const conv = this.convs.get(id);
@@ -276,6 +320,7 @@ export class FakeFreeScout {
     if (answer && typeof answer === "object" && answer.status === "error") return [200, answer];
     const isForward = Number(form.get("subtype") ?? 0) === 1 && !this.misbehave.forwardIgnoresSubtype;
     const isNote = !!form.get("is_note"); // PHP empty(): "" and absent are false ("0" too, ignored here)
+    if (!isForward && !isNote) return this.customerReply(id, conv, form);
     const to = form.getAll("to_email[]");
     if (isForward && !to[0]) return [200, { status: "error", msg: "Please specify a recipient." }];
     const status = Number(form.get("status") ?? 0);
@@ -300,6 +345,80 @@ export class FakeFreeScout {
       conv.threads.push({ id: this.nextThreadId++, type: "message", body, to: [conv.customer_email] });
     }
     if (this.misbehave.forwardAnswer !== undefined) return [200, this.misbehave.forwardAnswer];
+    return [200, { status: "success", msg: "", redirect_url: `${this.base}/conversation/${id}` }];
+  }
+
+  /** load_draft (ConversationsController::ajax): Thread::find, state must be draft, the conversation viewable. */
+  private loadDraft(form: URLSearchParams): [number, unknown] | null {
+    if (![...this.convs.values()].length) return null;
+    this.convPosts.push([...form.entries()]);
+    const id = Number(form.get("thread_id"));
+    const owner = [...this.convs.values()].find((c) => c.threads.some((t) => t.id === id));
+    const t = owner?.threads.find((x) => x.id === id);
+    if (!owner || !t) return [200, { status: "error", msg: "Thread not found" }];
+    if (t.type !== "draft") return [200, { status: "error", msg: "Thread is not in a draft state" }];
+    if (owner.number === 10) return [200, { status: "error", msg: "Not enough permissions" }];
+    const data = {
+      thread_id: t.id,
+      from_alias: null,
+      to: t.to?.[0] ?? owner.customer_email,
+      cc: t.cc ?? [],
+      bcc: t.bcc ?? [],
+      body: t.body,
+      is_forward: t.forward ? 1 : 0,
+      attachments: Array.from({ length: t.attachments ?? 0 }, (_, i) => ({ id: `enc${i}`, name: `file${i}.pdf`, size: 10, url: "#" })),
+    };
+    return [200, { status: "success", msg: "", data }];
+  }
+
+  /**
+   * send_reply without is_note/subtype (ConversationsController::ajax, FreeScout 1.8.248): with thread_id the draft is
+   * converted IN PLACE to a published message carrying the POSTED body; to = posted `to` or customer_email; cc/bcc from
+   * the request only. Status and assignee follow status/user_id. No status line is logged.
+   */
+  private customerReply(id: number, conv: FakeConv, form: URLSearchParams): [number, unknown] {
+    const m = this.misbehave;
+    const ans = m.replyAnswer as { status?: unknown } | undefined;
+    if (ans && typeof ans === "object" && ans.status === "error") return [200, ans];
+    if (m.replyNoop) return [200, { status: "success", msg: "" }];
+    const threadId = form.get("thread_id") ? Number(form.get("thread_id")) : undefined;
+    let draft: FakeThread | undefined;
+    if (threadId !== undefined) {
+      const owner = [...this.convs.values()].find((c) => c.threads.some((t) => t.id === threadId));
+      if (owner && owner !== conv) return [200, { status: "error", msg: "Incorrect thread" }];
+      draft = conv.threads.find((t) => t.id === threadId);
+      if (draft && draft.type !== "draft") return [200, { status: "error", msg: "Message has been already sent. Please discard this draft." }];
+    }
+    const body = form.get("body") ?? "";
+    const to = form.get("to") || conv.customer_email;
+    const cc = form.getAll("cc[]");
+    const bcc = form.getAll("bcc[]");
+    const status = Number(form.get("status") ?? 0);
+    if (status) conv.status = status;
+    const userId = Number(form.get("user_id") ?? 0);
+    conv.assignee_id = userId === -1 ? -1 : userId || conv.assignee_id;
+    if (m.replyReassigns !== undefined) conv.assignee_id = m.replyReassigns;
+    if (m.replyChangesStatus !== undefined) conv.status = m.replyChangesStatus;
+    if (m.replyChangesCustomer !== undefined) conv.customer_email = m.replyChangesCustomer;
+    const by = m.replyAuthor ?? this.postUserId;
+    const shown = { to: [m.replyShowsTo ?? to], cc: m.replyShowsCc ?? cc };
+    let thread: FakeThread;
+    if (m.replyAddsNote) {
+      thread = { id: this.nextThreadId++, type: "note", body };
+      conv.threads.push(thread);
+    } else if (draft && m.replyLeavesDraft) {
+      thread = draft;
+    } else if (draft && !m.replyDraftCreatesNew) {
+      Object.assign(draft, { type: "message", body, by, ...shown, attachments: undefined, forward: undefined, bcc });
+      thread = draft;
+    } else {
+      thread = { id: this.nextThreadId++, type: "message", body, by, ...shown, bcc };
+      conv.threads.push(thread);
+      if (m.replyAddsTwo) conv.threads.push({ id: this.nextThreadId++, type: "message", body, by, ...shown });
+    }
+    if (m.replyAlsoRemoves !== undefined) conv.threads = conv.threads.filter((x) => x.id !== m.replyAlsoRemoves);
+    if (thread.type === "message") this.replies.push({ conversation_id: id, thread_id: thread.id!, to, cc, bcc, body, from_draft: !!draft });
+    if (m.replyAnswer !== undefined) return [200, m.replyAnswer];
     return [200, { status: "success", msg: "", redirect_url: `${this.base}/conversation/${id}` }];
   }
 
@@ -449,6 +568,11 @@ export class FakeFreeScout {
           req.socket.destroy();
           return;
         }
+        if (sim && this.misbehave.replyDropsConnection && form.get("action") === "send_reply" && !form.get("is_note") && !form.get("subtype")) {
+          this.misbehave.replyDropsConnection = false;
+          req.socket.destroy();
+          return;
+        }
         if (sim) return json(...sim);
         return json(200, { status: "success", action: form.get("action") });
       }
@@ -459,6 +583,10 @@ export class FakeFreeScout {
           if (!sess.authed) return redirect("/login");
           if (this.misbehave.rereadFailsAfterForward && this.forwards.length) {
             this.misbehave.rereadFailsAfterForward = false;
+            return send(502, "Bad Gateway");
+          }
+          if (this.misbehave.rereadFailsAfterReply && this.replies.length) {
+            this.misbehave.rereadFailsAfterReply = false;
             return send(502, "Bad Gateway");
           }
           return send(200, simConversationPage(this.base, sess.token, Number(m![1]), conv, sess.userId ?? 7));
@@ -475,9 +603,15 @@ export interface FakeThread {
   type: "customer" | "message" | "note" | "draft" | "lineitem";
   body: string;
   to?: string[];
+  /** Cc recipients (rendered as "Cc:" on messages; returned by load_draft for drafts). */
+  cc?: string[];
+  /** Bcc recipients of a draft (returned by load_draft only). */
+  bcc?: string[];
+  /** Number of attachments on a draft (returned by load_draft). */
+  attachments?: number;
   /** Forward note: number of the child "Fwd:" conversation (rendered with a .thread-badge). */
   forward_child?: number;
-  /** Forward note rendered with the badge but without the child-conversation link. */
+  /** Forward note rendered with the badge but without the child-conversation link. On a draft: a forward draft. */
   forward?: boolean;
   /** Forward note rendered with only FreeScout's `.alert.alert-note` forward alert: no badge, no recipients. */
   forward_alert_only?: number;
@@ -501,6 +635,14 @@ export interface FakeConv {
   draft: boolean;
   /** Render the page without the customer panel (#conv-layout-customer), e.g. a theme/layout change. */
   no_customer_panel?: boolean;
+  /** Conversation type class (conv-type-*), default "email". */
+  type?: string;
+  /** Reply form To select (view.blade.php renders it when the customer has several addresses): [email, selected]. */
+  reply_to_options?: Array<[string, boolean]>;
+  /** #conv-list-col[data-mailbox_id] (view.blade.php); default mailbox_id, null = not rendered. */
+  list_mailbox_id?: number | string | null;
+  /** Reply form Cc preset (the conversation's remembered CC list). */
+  cc_preset?: string[];
   threads: FakeThread[];
 }
 
@@ -522,7 +664,9 @@ export function simConversationPage(base: string, token: string, id: number, c: 
       t.type === "customer"
         ? `<a href="${base}/customers/5/edit">Cust Omer</a>`
         : t.type === "draft"
-          ? "you [Draft]"
+          ? (t.by ?? userId) === userId
+            ? "you"
+            : "Other Agent"
           : (t.by ?? userId) === userId
             ? `<a href="${base}/users/profile/${userId}">you</a>`
             : `<a href="${base}/users/profile/${t.by}">Other Agent</a>`;
@@ -537,22 +681,35 @@ export function simConversationPage(base: string, token: string, id: number, c: 
     // child link is FreeScout chrome inside .thread-body but OUTSIDE .thread-content: `.alert.alert-note`.
     const alertChild = t.forward_child ?? t.forward_alert_only;
     const fwdAlert = alertChild !== undefined ? `<div class="alert alert-note">You forwarded this conversation. Forwarded conversation: <a href="${base}/conversation/${alertChild + 1000}">#${alertChild}</a></div>` : "";
-    const recips = t.to?.length ? `<div class="thread-recipients"><div><strong>To:</strong> ${esc(t.to.join(", "))}</div></div>` : "";
+    const recipLines =
+      t.type === "draft"
+        ? ""
+        : (t.to?.length ? `<div><strong>To:</strong> ${esc(t.to.join(", "))}</div>` : "") +
+          (t.cc?.length ? `<div><strong>Cc:</strong> ${esc(t.cc.join(", "))}</div>` : "");
+    const recips = recipLines ? `<div class="thread-recipients">${recipLines}</div>` : "";
+    // thread.blade.php: a draft's "[Draft]" marker sits outside <strong> (captured in docs/fixtures/conversation-1-draft.html).
+    const draftMark = t.type === "draft" ? " &nbsp; [Draft]" : "";
     const content = t.type === "draft" ? `<div class="thread-body">${t.body}</div>` : `<div class="thread-body">${fwdAlert}<div class="thread-content">${t.body}</div></div>`;
-    return `<div class="thread thread-type-${t.type}" id="thread-${t.id}" data-thread_id="${t.id}"><div class="thread-message">${fwd}<div class="thread-header"><div class="thread-title"><div class="thread-person"><strong>${person}</strong></div>${recips}</div><div class="thread-info"><a href="#thread-${t.id}" class="thread-date" title="Oct 26, 2026 10:00">now</a></div></div>${content}</div>${options}</div>`;
+    return `<div class="thread thread-type-${t.type}" id="thread-${t.id}" data-thread_id="${t.id}"><div class="thread-message">${fwd}<div class="thread-header"><div class="thread-title"><div class="thread-person"><strong>${person}</strong>${draftMark}</div>${recips}</div><div class="thread-info"><a href="#thread-${t.id}" class="thread-date" title="Oct 26, 2026 10:00">now</a></div></div>${content}</div>${options}</div>`;
   };
-  const layoutClass = c.draft ? "conv-new" : "conv-type-email";
+  const layoutClass = c.draft ? "conv-new" : `conv-type-${c.type ?? "email"}`;
+  const replyForm =
+    (c.reply_to_options
+      ? `<select name="to" id="to" class="form-control">${c.reply_to_options.map(([e, sel]) => `<option value="${esc(e)}"${sel ? ' selected="selected"' : ""}>Cust &lt;${esc(e)}&gt;</option>`).join("")}</select>`
+      : "") +
+    `<select class="form-control recipient-select" name="cc[]" id="cc" multiple>${(c.cc_preset ?? []).map((e) => `<option value="${esc(e)}" selected="selected">${esc(e)}</option>`).join("")}</select>`;
   const menus = c.draft
     ? ""
     : `<div id="conv-assignee"><span class="conv-info-val"><span>${assigneeName}</span></span><ul class="dropdown-menu conv-user">${userItems}</ul></div>` +
       `<div id="conv-status"><span class="conv-info-val"><span>${STATUS_NAMES[c.status]}</span></span><ul class="dropdown-menu conv-status">${statusItems}</ul></div>`;
   return `<!DOCTYPE html><html><head><meta name="csrf-token" content="${token}"></head>
 <body data-auth_user_id="${userId}" data-conversation_id="${id}" data-mailbox_id="${c.mailbox_id}"><span class="nav-user">Agnes</span>
+${c.list_mailbox_id === null ? "" : `<div id="conv-list-col" data-mailbox_id="${esc(String(c.list_mailbox_id ?? c.mailbox_id))}" data-conversation_id="${id}"></div>`}
 <div id="conv-layout" class="${layoutClass}"><div id="conv-toolbar">${menus}</div>
 <div id="conv-subject"><div class="conv-numnav"># <strong>${c.number}</strong></div><div class="conv-subjtext"><span>Fake subject ${id}</span></div></div>
 ${c.no_customer_panel ? "" : `<div id="conv-layout-customer"><div class="customer-snippet"><a href="${base}/customers/5/edit" class="customer-name">Cust Omer</a>
 <ul class="customer-contacts"><li class="customer-email"><a href="#" class="contact-main">${esc(c.customer_email)}</a></li></ul></div></div>`}
-<div id="conv-layout-main">${[...c.threads].reverse().map(thread).join("\n")}</div></div></body></html>`;
+<div id="conv-layout-main">${[...c.threads].reverse().map(thread).join("\n")}</div><form class="form-reply">${c.draft ? "" : replyForm}</form></div></body></html>`;
 }
 
 function tagUrl(base: string, name: string): string {

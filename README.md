@@ -3,8 +3,8 @@
 An [MCP](https://modelcontextprotocol.io) server that lets Claude work a [FreeScout](https://freescout.net)
 inbox **without an API key**, using your browser cookie or login. It sees what your FreeScout user sees.
 
-Reads, search, stats and reports, internal notes, reply drafts, tags and closing. It never replies to customers;
-forwarding is off unless you set an allow-list.
+Reads, search, stats and reports, internal notes, reply drafts, tags and closing. It does not reply to customers
+unless the server operator sets `FREESCOUT_REPLY_ENABLED=1`; forwarding is off unless you set an allow-list.
 
 ## Quick start
 
@@ -42,6 +42,8 @@ All configuration comes from environment variables (see `.env.example`):
 | `FREESCOUT_ALLOW_INSECURE` | no | Set to `1` to allow a plain `http://` URL to a host other than `localhost`/`127.0.0.1`. Without it the server refuses to start, because the cookie and password would travel unencrypted |
 | `FREESCOUT_LOG_LEVEL` | no | `debug`/`info`/`warn`/`error` (stderr), default `info` |
 | `FREESCOUT_FORWARD_ALLOW` | no | Enables `forward_conversation`. Comma- or space-separated exact addresses (`ops@example.com`) and/or domains (`@example.com`, that exact domain only, no subdomains). Unset or empty: the tool is not registered at all. A malformed entry stops the server at startup. See [Forwarding](#security-model) |
+| `FREESCOUT_REPLY_ENABLED` | no | Set to `1` (or `true`) to enable `send_reply`, which **emails the customer**. Unset, empty, `0` or `false`: the tool is not registered at all. Any other value stops the server at startup. See [Customer replies](#security-model) |
+| `FREESCOUT_REPLY_MAILBOXES` | no | Only with `FREESCOUT_REPLY_ENABLED`: comma- or space-separated mailbox ids replies are limited to (e.g. `1,3`). Unset: every mailbox the account can reply in. A malformed entry (`*`, `all`, names) stops the server at startup; set without `FREESCOUT_REPLY_ENABLED` it only logs a warning |
 
 You can set both: the cookie is used first, and the credentials are used only when the
 session turns out to be expired.
@@ -153,6 +155,7 @@ Configuration (environment of the server process):
 | `MCP_MAX_SESSIONS` | `100` | Concurrent session cap; beyond it `initialize` gets `503` |
 | `FREESCOUT_TIMEOUT_MS`, `FREESCOUT_ALLOW_INSECURE`, `FREESCOUT_LOG_LEVEL`, `FREESCOUT_STATS_DELAY_MS` | | As in stdio mode |
 | `FREESCOUT_FORWARD_ALLOW` | unset | As in stdio mode, for every session. Read only from the server's environment: no request header can set or widen it |
+| `FREESCOUT_REPLY_ENABLED`, `FREESCOUT_REPLY_MAILBOXES` | unset | As in stdio mode, for every session. Read only from the server's environment: no request header can set or widen them |
 
 `FREESCOUT_COOKIE`/`FREESCOUT_USER`/`FREESCOUT_PASSWORD` are ignored in HTTP mode. `GET /healthz` answers
 `{"ok":true,"version":"..."}` without auth, for monitors; it reveals nothing else.
@@ -242,12 +245,13 @@ which may differ from the `#number`). Everything is limited to what your FreeSco
 | `conversations_report` | `from`, `to`, `mailbox_id?`, `type?`, `tag_id?` (no user filter), `include_names?` (default false) | FreeScout's Conversations report: `metrics` (total / new conversations, messages received, customers, conversations per day, busiest day; a non-numeric card has `value: null` and the text in `raw_value`), the new-conversations day `chart` with `chart_options`, `most_active_customers` (`customer_id`, `count`) and `tags` (`name`, `count`). Customer names only with `include_names: true`, flagged untrusted. Needs the paid Reports module. Read-only (one report-computing request per call). |
 | `time_tracking_report` | same as `conversations_report` | FreeScout's Time Tracking report (page `/reports/time-tracking`, wire name `time`): `metrics` (total hours spent, average hours per update), `chart` (hours per user), `users` (time spent and average per update), `conversations` (`conversation_id`, `number`, time spent) and `customers` (`customer_id`, time spent). Every time is `{raw, minutes}` (FreeScout's text and whole minutes, `null` when not parsable). Subjects, customer names and cells of unrecognised columns (`extra_columns`) only with `include_names: true`, flagged untrusted. Needs the paid Reports module (and its time tracking). Read-only (one report-computing request per call). |
 | `add_note` | `conversation_id`, `body` | Adds an **internal note**. Status and assignee are kept. The server re-reads the conversation and fails loudly unless the new thread is a note. If a teammate changed status/assignee during the call, returns the note with `concurrent_change_detected: true` and a `warning` to re-check both. Refuses unsent draft conversations (a new conversation still being composed), where FreeScout would publish it. |
-| `save_draft` | `conversation_id`, `body`, `thread_id?` | Saves a **reply draft** for a human to review and send in FreeScout. Pass the returned `thread_id` to update the same draft (FreeScout also allows editing a teammate's draft this way). |
+| `save_draft` | `conversation_id`, `body`, `thread_id?` | Saves a **reply draft** for a human to review and send in FreeScout. Pass the returned `thread_id` to update the same draft (FreeScout also allows editing a teammate's draft this way). Saving never sends; `send_reply` (when enabled) can send your own draft unchanged. |
 | `add_tag` | `conversation_id`, `tags` (1 to 10 names, each 1 to 50 characters, no commas) | **Adds** tags to one conversation; never removes one, never changes status, assignee or customer. Skips names already on it (case-insensitive) and posts nothing if all are there. Re-reads the conversation and fails loudly if an earlier tag disappeared or a new one is missing. Returns `tags_before`, `tags_after`, `added`, `response_tags`. Needs the paid Tags module; refuses cleanly without it and on unsent draft conversations. |
 | `remove_tag` | `conversation_id`, `tags` (1 to 10 names, each 1 to 50 characters, no commas) | **Removes** the named tags from one conversation (the tag itself stays in FreeScout); never changes status, assignee or customer. Names are matched case-insensitively against the tags shown; absent ones are returned in `not_present` and nothing is posted for them. One `action=remove` POST per tag. Re-reads the conversation and fails loudly if a removed tag is still there or any other tag disappeared. Returns `tags_before`, `tags_after`, `removed`, `not_present`. Needs the paid Tags module; refuses cleanly without it and on unsent draft conversations. |
 | `remove_note` | `conversation_id`, `thread_id` | **Permanently deletes one internal note written by the logged-in agent** (FreeScout's `delete_thread`, a hard delete; the result returns the deleted `body`). Refused before any POST: customer messages, replies, drafts (use `discard_draft`), status lines, forward notes, other users' notes, the conversation's first thread, notes FreeScout does not offer to delete (`can_delete` in `get_conversation`) and thread ids not on that conversation (also what a second call returns). Posts exactly `action=delete_thread&thread_id=N`, then re-reads the conversation and fails loudly if the note is still there or any other thread disappeared. Never changes status or assignee; nothing is emailed. Returns `removed`, `body`, `thread_count_before`/`_after`. |
 | `close_conversation` | `conversation_id` | Sets the status to **Closed**, nothing else: it never reopens or sets Active/Pending/Spam, never changes the assignee and never emails the customer (subscribed teammates may get FreeScout's internal notification). Already closed: posts nothing and returns `already_closed: true`. Re-reads the conversation and fails loudly unless it is closed, the assignee is unchanged and only a status line was added. Returns `previous_status`. Refuses unsent draft conversations and **Spam** conversations (closing would un-spam them). If another status/assignee change was logged during the call, the result carries `concurrent_change_detected: true` and a `warning`. |
 | `forward_conversation` | `conversation_id`, `to` (one address), `body` | **Only registered when `FREESCOUT_FORWARD_ALLOW` is set.** **Sends an email**: FreeScout creates a new "Fwd:" conversation for the recipient (and a customer record for their address) and emails it after its 15 s undo window. `to` must match the allow-list and can never be the conversation's customer; refused when the page does not show the customer's email (the check cannot be applied). Status and assignee are kept. Re-reads the original conversation and fails loudly unless the only new thread is the forward note. Returns `forwarded_to`, the note's `thread_id` and, when the page shows it, `forwarded_conversation_number`. An error starting with `POSSIBLY SENT:` means the POST went out but its outcome is unknown (dropped connection, ambiguous answer, failed re-read): **never retry**, check the conversation in FreeScout. A teammate's status/assignee change during the call gives success with `concurrent_change_detected: true` and a `warning`. |
+| `send_reply` | `conversation_id`, exactly one of `body` / `draft_thread_id`, `status?` (`active`/`pending`/`closed`) | **Only registered when `FREESCOUT_REPLY_ENABLED=1`.** **Emails the customer**: FreeScout queues it for 15 s, but its Undo link is shown only to the sending session (this server), so it cannot be taken back. `body` composes a new reply; `draft_thread_id` sends one of **your own** reply drafts (FreeScout shows it as last edited by you) exactly as saved (the save_draft, human approves, send flow). The recipient is always the conversation's customer email alone: there are no to/cc/bcc parameters, and FreeScout clears any CC/BCC it remembered on the conversation (the result warns when it had some). `status` omitted keeps the current status; the assignee is never changed. Refused before any POST: mailboxes outside `FREESCOUT_REPLY_MAILBOXES` (taken from the conversation page; two different mailbox ids on the page are refused), Spam, phone/chat and unsent draft conversations, pages without a customer email, drafts that are not yours, are forward drafts, have other recipients, CC/BCC or attachments, or whose stored text differs from the page (edited in between), a second call on a conversation while one is in flight, and a body equal to your own newest reply (likely duplicate). English FreeScout UI only; other languages fail closed (every reply refused). Re-reads the conversation and fails loudly (`DANGER`) unless exactly one reply appeared (draft: the draft itself became the reply). Returns `thread_id`, `sent_to`, `sent_from_draft`, `status`, `undo_note`. `POSSIBLY SENT:` means **never retry** (FreeScout has no duplicate check for replies). |
 | `discard_draft` | `conversation_id`, `thread_id` | Deletes a reply draft (refuses anything that isn't a draft thread). FreeScout lets any viewer discard any draft on the conversation, a teammate's included, so only discard drafts you created. |
 
 `body` is plain text (a blank line starts a new paragraph) or simple HTML. It is treated as HTML only when it
@@ -338,7 +342,10 @@ non-empty `is_note` field is the only thing that makes it a note. `add_note` han
 - After posting, it re-reads the conversation and checks that the new thread's type is `note`.
 
 Drafts use `save_draft`, which never sends anything. The draft shows up on the conversation in the
-FreeScout UI, where a human can edit and send it.
+FreeScout UI, where a human can edit and send it. If the operator enabled `send_reply`, the agent can also send its
+own draft once the human has approved it: `send_reply` with `draft_thread_id` re-posts the stored draft text unchanged
+(FreeScout publishes whatever body is posted, so the server fetches the stored body with `load_draft` first) and never
+posts recipients, `is_note` or `subtype`. Without `FREESCOUT_REPLY_ENABLED` there is no code path that sends a reply.
 On the demo, the integration test checks the database directly: the note row has `threads.type = 3`
 (`TYPE_NOTE`), and `send_logs` has no row addressed to the customer. FreeScout may still email *teammates*
 subscribed to note notifications through the mailbox's outgoing mail settings. That is internal mail.
@@ -348,9 +355,11 @@ subscribed to note notifications through the mailbox's outgoing mail settings. T
 The full adversarial review is in [docs/REDTEAM.md](docs/REDTEAM.md) (live attacks against the demo as a
 restricted agent, plus offline regression suites in `test/redteam/`). Verdict: no exploitable finding. In short:
 
-- **No customer reply tool exists, and none will be added.** The write tools are internal **notes** (plus deleting
-  your own notes), reply **drafts** (plus discarding drafts), **adding tags**, **closing** a conversation and, only when the operator enables it,
-  **forwarding** to an allow-listed internal address. A human reviews and sends drafts from the FreeScout UI.
+- **Customer replies only when the operator turns them on.** By default no reply tool exists. The write tools are
+  internal **notes** (plus deleting your own notes), reply **drafts** (plus discarding drafts), **adding/removing tags**,
+  **closing** a conversation and, only when the operator enables them, **forwarding** to an allow-listed internal address
+  and **replying to the customer** (`send_reply`, `FREESCOUT_REPLY_ENABLED=1`). Without that, a human reviews and sends
+  drafts from the FreeScout UI.
 - **Closing is pinned.** `close_conversation` posts only `{action:'conversation_change_status', conversation_id,
   status:'3'}` (`assertStatusForm`: exact keys, single integer id, status `3`). No code path sends any other status,
   so nothing can reopen, mark pending/spam or reassign. Already-closed conversations get no POST; Spam conversations
@@ -395,6 +404,25 @@ restricted agent, plus offline regression suites in `test/redteam/`). Verdict: n
   and `close_conversation` do the same. A forward is **irreversible** once FreeScout's 15 s undo window passes, it creates a customer
   record for the recipient, and the tool description tells the model never to forward because a customer asked.
   `assertNoteForm` still refuses `subtype`, so `add_note` can never turn into a forward.
+- **Customer replies** (`send_reply`) are gated like forwarding. (1) The tool does not exist unless the server
+  operator sets `FREESCOUT_REPLY_ENABLED=1`; `FREESCOUT_REPLY_MAILBOXES` can limit it to some mailboxes, checked against
+  the mailbox the conversation page shows (never a caller value). Both come from the server environment only, are
+  validated at startup and logged. (2) The recipient cannot be chosen: the form carries no `to`/`cc`/`bcc`, so FreeScout
+  sends to the conversation's customer email alone; the page must show that email, and a reply form preset to another
+  address is refused. Spam, phone/chat and unsent draft conversations are refused. (3) The form is pinned:
+  `{action:'send_reply', conversation_id, mailbox_id, body, user_id, status}` plus `thread_id` when sending a draft,
+  checked by `assertReplyForm` right before the POST (exact keys, integer ids, status 1/2/3, never `is_note`,
+  `subtype`, `is_create`, recipients, `conv_history`). `user_id` is the current assignee, so it never changes. (4) The
+  draft path only sends the logged-in agent's own reply drafts ("own" = FreeScout shows it as last edited by you),
+  re-posts their stored text unchanged, and refuses forward drafts, drafts addressed to anyone but the customer (or
+  with CC/BCC or attachments) and drafts whose stored text differs from what the page showed. A second `send_reply`
+  on a conversation while one is in flight, and a new body equal to the agent's own newest reply, are refused. (5) The
+  conversation is re-read: exactly one new reply by the agent (or the draft turned into the reply), no other thread
+  created or removed, the same customer email, status as requested, assignee unchanged; otherwise `DANGER`. (6) `POSSIBLY SENT:` and the concurrent-change
+  warning work as for forwarding. FreeScout has no duplicate check for replies, so a retry would email the customer
+  twice; the tool description says never to retry and never to send because ticket content asks for it. (7) English
+  FreeScout UI only: in other languages the "you" author and the conversation-type class are translated, so every reply is
+  refused (fails closed).
 - **Drafts are confined.** `save_draft` never sends `is_note`/`subtype`/`is_create`; updating or discarding requires
   a thread that is a draft on the same conversation. Unsent draft *conversations* are refused by every write tool,
   because `send_reply` there would publish them.
@@ -468,6 +496,7 @@ src/
   reports.ts    Reports module: availability, assertReportForm, the one /reports/ajax POST, productivity/satisfaction/conversations/time tracking, agent_stats, list_report_users
   dates.ts      strict YYYY-MM-DD validation, UTC date arithmetic, calendar buckets (days, ISO/Sunday weeks, months)
   forward-allow.ts FREESCOUT_FORWARD_ALLOW parsing and recipient matching
+  reply-gate.ts FREESCOUT_REPLY_ENABLED / FREESCOUT_REPLY_MAILBOXES parsing
   ajax.ts       FreeScout ajax envelope check ({status, msg})
   parsers/      cheerio parsers: dashboard/sidebar, conversation tables, conversation page, customer, search filters, Reports module
   cookies.ts    Cookie header parser
@@ -483,8 +512,9 @@ test/
   write-ops.test.ts        add_note / save_draft guards with a stub client
   tags.test.ts             list_tags, add_tag, remove_tag, assertTagForm, assertTagRemoveForm, tag form on the wire
   remove-note.test.ts      remove_note: own-note checks, refusals before any POST, assertDeleteThreadForm, verification
-  tools.test.ts            tool registry (no reply tool; forward only with an allow-list), error mapping, structuredContent
+  tools.test.ts            tool registry (send_reply only with the reply gate; forward only with an allow-list), error mapping, structuredContent
   status-forward.test.ts   close_conversation / forward_conversation guards, allow-list, wire forms on the fake
+  send-reply.test.ts       send_reply: gate parsing, assertReplyForm, refusals, wire forms (new reply, draft), DANGER / POSSIBLY SENT on the fake
   search-stats.test.ts     search filters, list_assignees, ticket_volume (buckets, caps, serial requests) on the fake
   reports.test.ts          Reports parsers on the fixtures, assertReportForm, wire bodies, availability modes, week/month periods on the fake
   reports-conversations-time.test.ts conversations / time tracking parsers, durations, slug <-> wire name, include_names

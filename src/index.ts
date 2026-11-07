@@ -5,6 +5,7 @@ import { FreeScoutClient } from "./client.js";
 import { loadConfig } from "./config.js";
 import { describeForwarding } from "./forward-allow.js";
 import { addSecret, log, redact } from "./log.js";
+import { describeReply, REPLY_DISABLED } from "./reply-gate.js";
 import { Session } from "./session.js";
 import { registerTools } from "./tools/index.js";
 import { VERSION } from "./version.js";
@@ -24,7 +25,8 @@ async function main(): Promise<void> {
   const client = new FreeScoutClient(session);
 
   const server = new McpServer({ name: "freescout-mcp", version: VERSION });
-  registerTools(server, { client, forwardAllow: config.forwardAllow, statsDelayMs: config.statsDelayMs });
+  const reply = config.reply ?? REPLY_DISABLED;
+  registerTools(server, { client, forwardAllow: config.forwardAllow, statsDelayMs: config.statsDelayMs, reply });
 
   await server.connect(new StdioServerTransport());
   log.info(
@@ -33,6 +35,7 @@ async function main(): Promise<void> {
     })`,
   );
   log.info(describeForwarding(config.forwardAllow));
+  log.info(describeReply(reply));
 }
 
 main().catch((e) => {

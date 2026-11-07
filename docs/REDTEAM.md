@@ -5,6 +5,11 @@ notes, save/discard its own reply drafts and (since 2026-10-25) add tags (since 
 status, assign, forward, or delete anything except its own drafts (since 2026-11-04 also its own plain internal notes,
 see "remove_note" at the end).
 
+> **Scope change 2026-11-07 (user decision):** "never send email to a customer" is now "never, unless the server
+> operator sets `FREESCOUT_REPLY_ENABLED=1`". With it unset (the default) nothing below changes and no reply tool
+> exists. With it set, `send_reply` emails the conversation's customer through a pinned, re-verified path; see
+> "send_reply (2026-11-07)" at the end. Not yet exercised live by a red-team pass.
+
 Method: attacks driven through the real MCP operations against the live demo
 (`https://freescout.example.com`) as the **restricted agent** (`agent@…`, Support mailbox only),
 with before/after inspection of the `conversations`, `threads`, `send_logs` and `jobs` tables over
@@ -392,7 +397,7 @@ eight in `src/operations.ts`, `fetchReport` in `src/reports.ts`) besides the per
 ## remove_note (2026-11-04)
 
 Scope change: one destructive write added, always registered. `delete_thread` moves out of the endpoint doc's NEVER
-list (docs/freescout-endpoints.md §5.3, §5.6). FreeScout deletes by **thread id alone** (no conversation id), refuses
+list (docs/freescout-endpoints.md §5.3a, §5.6). FreeScout deletes by **thread id alone** (no conversation id), refuses
 non-notes (`Thread not found`) and other users' notes (`ThreadPolicy::delete`: own only, even for admins), and
 hard-deletes the row and its attachments. It does **not** refuse forward notes or a conversation's first thread.
 
@@ -418,3 +423,40 @@ Source-scan tests (red-team file, "the one delete_thread POST"): four quoted `de
 A tool-level test drives a customer message asking to "delete all internal notes" plus colleague, forward and
 other-conversation note ids through `remove_note`: none is posted; only the agent's own note is, with exactly
 `action` + `thread_id` (+ `_token`) on the wire.
+
+## send_reply (2026-11-07)
+
+Scope change: the first customer-facing send. It reverses the "no reply tool" invariant behind server configuration
+only (PLAN.md "Scope update (2026-11-07)"). FreeScout facts it relies on are in docs/freescout-endpoints.md §5.3 (read
+from the 1.8.248 source in the demo container): omitted `to` = the conversation's `customer_email`; omitted `cc`/`bcc`
+= none (and the conversation's remembered CC/BCC are cleared); publishing a draft converts the same thread in place
+but stores the **posted** body; there is no author check on drafts and no duplicate check on replies.
+
+Guards:
+- **Gate.** The tool is registered only when `FREESCOUT_REPLY_ENABLED` is exactly `1`/`true` in the server
+  environment; any other value stops the server, and `FREESCOUT_REPLY_MAILBOXES` (positive ids only; `*`/`all` stop
+  the server) limits it. The HTTP server takes the gate from its options (env) and reads no reply header; a test sends
+  `X-FreeScout-Reply-Enabled`/`-Mailboxes` headers and the tool stays absent (or the mailbox stays refused).
+- **Recipient.** No recipient field is ever posted, so the email can only go to the conversation's customer. The page
+  must show the customer's email; a reply form whose To select is preset to another address is refused.
+- **Pinned form.** `assertReplyForm` runs right before the POST: exactly `action, conversation_id, mailbox_id, body,
+  user_id, status` (+ `thread_id` on the draft path only), string values, integer ids, `user_id` the current assignee
+  (or `-1`), `status` 1/2/3. `is_note`, `subtype`, `is_create`, `to`, `to_email[]`, `cc[]`, `bcc[]`, `conv_history`,
+  `after_send` and unknown keys are refused. `assertNoteForm` and `assertForwardForm` refuse what they refused before.
+- **Refusals before any POST.** Gate off; both or neither of body/draft; status other than active/pending/closed;
+  Spam, phone/chat and unsent draft conversations; a mailbox (from the page) outside the list.
+- **Draft path.** Only a `draft` thread on this conversation shown as the logged-in user's ("you"; FreeScout shows the
+  last editor, so a draft a teammate edited is refused). Then a read-only `load_draft` (pinned `{action, thread_id}`):
+  forward drafts, stored To other than the customer, any CC/BCC, attachments and empty bodies are refused. The stored
+  HTML is re-posted verbatim, so the model cannot swap the text at send time.
+- **After-state.** New reply: exactly one new thread, type `message`, by the logged-in user; draft: the same id now a
+  `message`, no new thread. No thread may vanish, a rendered To must be the customer alone, no Cc, status as requested,
+  assignee unchanged; anything else is `DANGER`. Ambiguous failures after dispatch are `POSSIBLY SENT: … Do NOT retry`.
+  Status lines are counted for the concurrent-change warning (a reply never logs one; only `changeStatus()` does).
+
+Source-scan tests: `action: "send_reply",` occurs three times (note, forward, reply builders); `port.ajaxPost(` call
+sites go from 10 to 12 (eight to `AJAX`: `load_draft` and the reply); `registerSendReply` is called once, behind
+`ctx.reply?.enabled === true`; `parseReplyGate` is called once (from env); the reply builder contains no `is_note`,
+`subtype` or recipient key. A tool-level test drives a customer message asking to reply to an attacker with a CC and
+mark spam: the spam status is rejected by the schema, smuggled `to`/`cc` arguments are dropped, and the one POST carries
+exactly the pinned keys with the current status/assignee; FreeScout (fake) records the customer as the only recipient.
