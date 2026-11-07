@@ -1,5 +1,6 @@
 import { parseForwardAllow } from "./forward-allow.js";
 import { log } from "./log.js";
+import { parseReplyGate, type ReplyGate } from "./reply-gate.js";
 
 export { parseForwardAllow, recipientAllowed } from "./forward-allow.js";
 
@@ -19,6 +20,11 @@ export interface BaseConfig {
   forwardAllow: string[];
   /** FREESCOUT_STATS_DELAY_MS: pause between consecutive ticket_volume and agent_stats requests (default 200, 0 allowed). */
   statsDelayMs: number;
+  /**
+   * FREESCOUT_REPLY_ENABLED / FREESCOUT_REPLY_MAILBOXES, parsed. send_reply is registered only when `reply.enabled`.
+   * Always from the server's environment; never from a request header. Optional so older callers compile (= disabled).
+   */
+  reply?: ReplyGate;
 }
 
 /** stdio mode: one FreeScout identity, taken from the environment. */
@@ -68,7 +74,14 @@ export function loadBaseConfig(env: NodeJS.ProcessEnv = process.env): BaseConfig
     timeoutMs: positiveInt(env.FREESCOUT_TIMEOUT_MS, 30_000),
     forwardAllow: parseForwardAllow(env.FREESCOUT_FORWARD_ALLOW),
     statsDelayMs: nonNegativeInt(env.FREESCOUT_STATS_DELAY_MS, DEFAULT_STATS_DELAY_MS),
+    reply: loadReplyGate(env),
   };
+}
+
+function loadReplyGate(env: NodeJS.ProcessEnv): ReplyGate {
+  const gate = parseReplyGate(env);
+  if (gate.warning) log.warn(gate.warning);
+  return gate;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
