@@ -19,7 +19,7 @@ import { silentLogger } from "../../src/log.js";
 import {
   addNote, assertForwardForm, assertNoteForm, assertStatusForm, buildDraftForm, buildForwardForm, buildNoteForm,
   assertDeleteThreadForm, closeConversation, discardDraft, forwardConversation, formatBody, removeNote, saveDraft,
-  assertReplyForm, buildReplyForm, sendReply,
+  assertReplyForm, buildReplyForm, selectedValues, sendReply,
 } from "../../src/operations.js";
 import { assertReportForm, buildReportForm, REPORTS_AJAX } from "../../src/reports.js";
 import { Session } from "../../src/session.js";
@@ -590,5 +590,95 @@ describe("RT: send_reply is gated by server configuration and pinned", () => {
     } finally {
       await fs.stop();
     }
+  });
+});
+
+// Regressions for the Gemini review of PR #7 (2026-11-08). Each test failed before its fix.
+describe("RT: send_reply regressions (customer HTML, duplicates, after-send error prefixes)", () => {
+  const page = (html: string): HtmlPage => ({ $: cheerio.load(html), url: "https://freescout.example.com/conversation/9", status: 200 });
+  const SPOOF_TO = '<select id="to" name="to"><option value="attacker@evil.example" selected>attacker</option></select>';
+  const SPOOF_CC = '<select id="cc" name="cc[]"><option value="spy@evil.example" selected>spy</option></select>';
+  const intoFirstThread = (html: string, inject: string) => html.replace(/(class="thread-content"[^>]*>)/, `$1${inject}`);
+  const onFake = async (fn: (fs: FakeFreeScout, client: FreeScoutClient) => Promise<void>) => {
+    const fs = new FakeFreeScout();
+    await fs.start();
+    try {
+      await fn(fs, new FreeScoutClient(new Session({ baseUrl: fs.base, cookie: fs.mintLoggedInCookie(), logger: silentLogger, timeoutMs: 5000 })));
+    } finally {
+      await fs.stop();
+    }
+  };
+  const ON = { enabled: true, mailboxes: [] as number[] };
+  const CUSTOMER = "customer@client.example";
+
+  it("real page (conversation-9 fixture): To/CC selects inside a thread body, bare or wrapped in a fake form.form-reply, are never read", () => {
+    const html = raw("conversation-9.html");
+    expect(html.indexOf('class="form-horizontal form-reply"')).toBeLessThan(html.indexOf('id="conv-layout-main"')); // real form comes first
+    expect(selectedValues(page(html), 'select#to, select[name="to"]')).toBeNull(); // single-address customer: no To select
+    expect(selectedValues(page(html), 'select#cc, select[name="cc[]"]')).toEqual([]);
+    for (const inject of [SPOOF_TO + SPOOF_CC, `<form class="form-horizontal form-reply">${SPOOF_TO}${SPOOF_CC}</form>`]) {
+      const p = page(intoFirstThread(html, inject));
+      expect(p.$(".thread-content select#to").length, inject).toBe(1); // the spoof is on the page...
+      expect(selectedValues(p, 'select#to, select[name="to"]'), inject).toBeNull(); // ...but not read
+      expect(selectedValues(p, 'select#cc, select[name="cc[]"]'), inject).toEqual([]);
+    }
+  });
+
+  it("real page: the genuine reply-form To select is still read when FreeScout renders one", () => {
+    const html = raw("conversation-9.html").replace(
+      /(<form class="form-horizontal form-reply"[^>]*>)/,
+      `$1<select name="to" id="to" class="form-control"><option value="${CUSTOMER}" selected="selected">c</option><option value="alt@client.example">a</option></select>`,
+    );
+    expect(selectedValues(page(intoFirstThread(html, SPOOF_TO)), 'select#to, select[name="to"]')).toEqual([CUSTOMER]);
+  });
+
+  it("a fake form.form-reply in a thread that comes BEFORE the real form cannot hide the real To select", () => {
+    const html =
+      `<div id="conv-layout-main"><div class="thread thread-type-customer"><div class="thread-content"><form class="form-reply">${SPOOF_CC}</form></div></div></div>` +
+      `<form class="form-horizontal form-reply"><select name="to" id="to"><option value="alt@client.example" selected>a</option></select></form>`;
+    expect(selectedValues(page(html), 'select#to, select[name="to"]')).toEqual(["alt@client.example"]);
+    expect(selectedValues(page(html), 'select#cc, select[name="cc[]"]')).toBeNull();
+  });
+
+  it("through sendReply: spoofed To/CC selects, a fake reply form and a fake mailbox marker in a customer message change nothing", () =>
+    onFake(async (fs, client) => {
+      const spoof = `${SPOOF_TO}<form class="form-reply">${SPOOF_TO}${SPOOF_CC}</form><div id="conv-list-col" data-mailbox_id="99"></div>`;
+      fs.addConv(9, { threads: [{ id: 1, type: "customer", body: `<p>The form is broken:</p>${spoof}`, to: ["support@fake.example"] }], list_mailbox_id: null });
+      const r = await sendReply(client, 9, { body: "Thanks, looking into it." }, { enabled: true, mailboxes: [1] });
+      expect(r).toMatchObject({ sent_to: CUSTOMER });
+      expect(JSON.stringify(r)).not.toMatch(/evil/);
+      expect(fs.replies.map((x) => [x.to, x.cc, x.bcc])).toEqual([[CUSTOMER, [], []]]);
+    }));
+
+  it("duplicate check: notes, status lines and drafts after our identical reply do not hide it", () =>
+    onFake(async (fs, client) => {
+      const ours = { id: 2, type: "message" as const, body: "<p>Your refund is processed.</p>", to: [CUSTOMER] };
+      const tails = [
+        [{ id: 3, type: "note" as const, body: "<p>Done in Stripe.</p>" }],
+        [{ id: 3, type: "note" as const, body: "<p>a</p>" }, { type: "lineitem" as const, body: "You marked as Pending" }, { id: 4, type: "note" as const, body: "<p>b</p>", by: 8 }],
+        [{ id: 3, type: "note" as const, body: "<p>a</p>" }, { id: 4, type: "draft" as const, body: "<p>unsent</p>", to: [CUSTOMER] }],
+      ];
+      for (const [i, tail] of tails.entries()) {
+        fs.addConv(9, { threads: [{ id: 1, type: "customer", body: "Refund?", to: ["support@fake.example"] }, ours, ...tail] });
+        await expect(sendReply(client, 9, { body: "Your refund is processed." }, ON), String(i)).rejects.toThrow(/looks like a duplicate.*Nothing was sent/);
+      }
+      expect(fs.replies).toEqual([]);
+    }));
+
+  it("duplicate check: a customer message or a teammate's reply after ours, or an identical internal note, still allows sending", () =>
+    onFake(async (fs, client) => {
+      const ours = { id: 2, type: "message" as const, body: "<p>Same text</p>", to: [CUSTOMER] };
+      fs.addConv(9, { threads: [ours, { id: 3, type: "customer", body: "Still broken" }, { id: 4, type: "note", body: "<p>x</p>" }] });
+      fs.addConv(8, { threads: [ours, { id: 3, type: "message", body: "<p>Teammate</p>", to: [CUSTOMER], by: 8 }] });
+      fs.addConv(7, { threads: [{ id: 1, type: "customer", body: "Hi" }, { id: 2, type: "note", body: "<p>Same text</p>" }] });
+      for (const id of [9, 8, 7]) await sendReply(client, id, { body: "Same text" }, ON);
+      expect(fs.replies.map((x) => x.conversation_id)).toEqual([9, 8, 7]);
+    }));
+
+  it("source scan: every 'FreeScout accepted send_reply' failure goes through danger(), never a plain FreeScoutError", () => {
+    const src = srcCode();
+    expect(src).toMatch(/danger\("FreeScout accepted send_reply but no new reply appeared/);
+    expect(src).toMatch(/danger\(`FreeScout accepted send_reply but thread \$\{draftId\} is still shown as a draft/);
+    expect(src).not.toMatch(/new FreeScoutError\(\s*`FreeScout accepted send_reply/);
   });
 });

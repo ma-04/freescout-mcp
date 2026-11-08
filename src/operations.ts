@@ -2168,8 +2168,9 @@ const sameEmail = (a: string | null | undefined, b: string) => (a ?? "").trim().
  * FreeScout's own `form.form-reply`, never thread bodies (HTMLPurifier already strips <select> and ids from those;
  * this keeps it true if a purifier setting ever changes).
  */
-function selectedValues(page: HtmlPage, sel: string): string[] | null {
-  const el = page.$("form.form-reply").first().find(sel).first();
+export function selectedValues(page: HtmlPage, sel: string): string[] | null {
+  const form = page.$("form.form-reply").filter((_, n) => !page.$(n).closest(".thread").length).first();
+  const el = form.find(sel).filter((_, n) => !page.$(n).closest(".thread").length).first();
   if (!el.length) return null;
   return el
     .find("option")
