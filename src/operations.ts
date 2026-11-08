@@ -9,8 +9,9 @@ import { checkAjax, type AjaxEnvelope } from "./ajax.js";
 import type { FreeScoutPort, HtmlPage } from "./client.js";
 import { AuthError, FreeScoutError, PermissionError } from "./errors.js";
 import { isStrictRecipient, recipientAllowed } from "./forward-allow.js";
+import { replyMailboxAllowed, type ReplyGate } from "./reply-gate.js";
 import { requireDate } from "./dates.js";
-import { parseConversation, type ParsedConversation, type ParsedThread } from "./parsers/conversation.js";
+import { parseConversation, STATUS_BY_VALUE, type ParsedConversation, type ParsedThread } from "./parsers/conversation.js";
 import { parseConversationTable, type ConversationRow, type ConversationTable } from "./parsers/conversation-table.js";
 import { parseCustomerEdit, parseCustomerSearch, parseCustomerSnippet, type CustomerProfile } from "./parsers/customer.js";
 import {
@@ -1184,8 +1185,9 @@ export async function removeTag(port: FreeScoutPort, conversationId: number, req
 }
 
 // ---------------------------------------------------------------------------------------------
-// Writes: internal note and reply draft. There is deliberately no customer reply/send code path. The note form
-// never carries `subtype`; forwarding is a separate, allow-listed and pinned path (forwardConversation, below).
+// Writes: internal note and reply draft. The note form never carries `subtype`; forwarding is a separate,
+// allow-listed and pinned path (forwardConversation, below). The only customer reply path is sendReply (end of this
+// file): its own pinned form, reachable only when the operator enabled FREESCOUT_REPLY_ENABLED.
 
 const BLOCK_TAGS = new Set(["p", "br", "div", "ul", "ol", "li", "pre", "blockquote", "h1", "h2", "h3", "h4", "h5", "h6", "table", "thead", "tbody", "tr", "td", "th", "hr"]);
 const INLINE_TAGS = new Set(["strong", "em", "b", "i", "u", "s", "a", "code", "span", "small", "sub", "sup"]);
@@ -1989,6 +1991,472 @@ export async function forwardConversation(
   if (lineitemCount(after) > lineitemsBefore) {
     result.concurrent_change_detected = true;
     warnings.push(concurrentChangeWarning(conversationId, "forward"));
+  }
+  if (warnings.length) result.warning = warnings.join(" ");
+  return result;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Customer reply (§5.3): send_reply WITHOUT is_note. This emails the conversation's customer after FreeScout's 15 s
+// undo window, so it is gated: the tool exists only when the operator set FREESCOUT_REPLY_ENABLED (optionally limited
+// by FREESCOUT_REPLY_MAILBOXES, checked against the mailbox the conversation PAGE shows), the form is pinned and asserted
+// (no recipient fields at all: FreeScout then uses the conversation's customer_email and clears CC/BCC), and the page is
+// re-read afterwards. Two paths: a new reply from `body`, or publishing one of the agent's own reply drafts unchanged
+// (FreeScout publishes whatever body is POSTED, so the stored draft body is fetched with load_draft and re-posted as is).
+
+/** Conversation::STATUS_* values a reply may set. Spam (4) is never sent. */
+export const REPLY_STATUSES = { active: 1, pending: 2, closed: 3 } as const;
+export type ReplyStatus = keyof typeof REPLY_STATUSES;
+
+export type ReplyForm = {
+  action: "send_reply";
+  conversation_id: string;
+  mailbox_id: string;
+  body: string;
+  user_id: string;
+  status: string;
+  /** Only when publishing a draft. */
+  thread_id?: string;
+};
+
+export interface ReplyFormInput {
+  conversation_id: number;
+  mailbox_id: number;
+  body: string;
+  /** Current assignee user id, or -1 when unassigned: FreeScout then leaves the assignee unchanged. */
+  user_id: number;
+  /** 1 active, 2 pending, 3 closed: the requested status, or the current one. */
+  status: number;
+  /** Draft thread to publish; absent for a new reply. */
+  thread_id?: number;
+}
+
+const REPLY_FORM_KEYS = ["action", "body", "conversation_id", "mailbox_id", "status", "user_id"];
+/** Named so the refusal says what was smuggled; any other unknown key is refused too. */
+const REPLY_FORBIDDEN_KEYS = [
+  "is_note", "subtype", "is_create", "to", "to_email", "to_email[]", "cc", "cc[]", "bcc", "bcc[]", "conv_history",
+  "after_send", "type", "multiple_conversations", "from_alias", "attachments", "attachments[]", "attachments_all",
+  "embeds", "subject", "saved_reply_id",
+];
+
+/**
+ * Hard guard run right before the POST. Exactly {action, conversation_id, mailbox_id, body, user_id, status} plus
+ * `thread_id` on the draft path (and only there). Every value is a string; ids are positive integers, user_id is a
+ * positive integer or -1, status is 1/2/3. Recipient fields (`to`, `to_email[]`, `cc[]`, `bcc[]`), `is_note`, `subtype`
+ * (forward), `is_create` (new conversation), `conv_history`, `after_send` and anything else are refused.
+ */
+export function assertReplyForm(form: unknown, path: "new" | "draft"): asserts form is ReplyForm {
+  if (!isPlainObject(form)) throw new FreeScoutError("Refusing to send reply form (not a plain object)");
+  const problems: string[] = [];
+  const keys = Object.keys(form);
+  const allowed = path === "draft" ? [...REPLY_FORM_KEYS, "thread_id"] : REPLY_FORM_KEYS;
+  for (const k of keys) {
+    if (REPLY_FORBIDDEN_KEYS.includes(k) || (k === "thread_id" && path !== "draft")) problems.push(`forbidden field ${k}`);
+    else if (!allowed.includes(k)) problems.push(`unexpected field ${k}`);
+  }
+  for (const k of allowed) if (!keys.includes(k)) problems.push(`${k} missing`);
+  for (const k of keys) if (typeof form[k] !== "string") problems.push(`${k} is not a string`);
+  if (form.action !== "send_reply") problems.push("action is not send_reply");
+  for (const k of path === "draft" ? ["conversation_id", "mailbox_id", "thread_id"] : ["conversation_id", "mailbox_id"]) {
+    const v = form[k];
+    if (typeof v !== "string" || !/^[1-9]\d*$/.test(v)) problems.push(`${k} is not a single positive integer string`);
+  }
+  if (typeof form.user_id !== "string" || !/^(-1|[1-9]\d*)$/.test(form.user_id)) problems.push("user_id is not a positive integer or -1");
+  if (typeof form.status !== "string" || !/^[123]$/.test(form.status)) problems.push("status is not 1, 2 or 3");
+  if (typeof form.body !== "string" || !form.body.trim()) problems.push("body is empty");
+  if (problems.length) throw new FreeScoutError(`Refusing to send reply form (${problems.join(", ")})`);
+}
+
+export function buildReplyForm(input: ReplyFormInput): ReplyForm {
+  const form: ReplyForm = {
+    action: "send_reply",
+    conversation_id: String(input.conversation_id),
+    mailbox_id: String(input.mailbox_id),
+    body: input.body,
+    user_id: String(input.user_id),
+    status: String(input.status),
+  };
+  if (input.thread_id !== undefined) form.thread_id = String(input.thread_id);
+  assertReplyForm(form, input.thread_id !== undefined ? "draft" : "new");
+  return form;
+}
+
+/** The only load_draft form: exactly {action:'load_draft', thread_id}. It only reads the stored draft. */
+export type LoadDraftForm = { action: "load_draft"; thread_id: string };
+
+export function assertLoadDraftForm(form: unknown): asserts form is LoadDraftForm {
+  if (!isPlainObject(form)) throw new FreeScoutError("Refusing to send load_draft form (not a plain object)");
+  const keys = Object.keys(form);
+  const problems: string[] = [];
+  for (const k of keys) if (k !== "action" && k !== "thread_id") problems.push(`unexpected field ${k}`);
+  if (form.action !== "load_draft") problems.push("action is not 'load_draft'");
+  if (typeof form.thread_id !== "string" || !/^[1-9]\d*$/.test(form.thread_id)) problems.push("thread_id is not a single positive integer string");
+  if (problems.length) throw new FreeScoutError(`Refusing to send load_draft form (${problems.join(", ")})`);
+}
+
+/** `load_draft` answer (§5.2): the draft as stored. `to` is only the first To address (Thread::getToFirst()). */
+export interface StoredDraft {
+  thread_id: number;
+  to: string | null;
+  cc: string[];
+  bcc: string[];
+  body: string;
+  is_forward: boolean;
+  attachments: number;
+}
+
+async function loadDraft(port: FreeScoutPort, threadId: number): Promise<StoredDraft> {
+  const form: LoadDraftForm = { action: "load_draft", thread_id: String(threadId) };
+  assertLoadDraftForm(form);
+  const res = checkAjax(await port.ajaxPost<AjaxEnvelope & { data?: unknown }>(AJAX, form), "load_draft");
+  const d = res.data;
+  if (!isPlainObject(d)) throw new FreeScoutError("load_draft: FreeScout returned no draft data; nothing was sent");
+  const list = (v: unknown): string[] | null => (Array.isArray(v) && v.every((x) => typeof x === "string") ? v : v == null ? [] : null);
+  const cc = list(d.cc);
+  const bcc = list(d.bcc);
+  if (cc === null || bcc === null) throw new FreeScoutError("load_draft: unexpected cc/bcc in FreeScout's answer; nothing was sent");
+  return {
+    thread_id: Number(d.thread_id),
+    to: typeof d.to === "string" ? d.to : null,
+    cc,
+    bcc,
+    body: typeof d.body === "string" ? d.body : "",
+    // Fail closed: only an explicit 0 means "not a forward", only an empty array means "no attachments".
+    is_forward: !(d.is_forward === 0 || d.is_forward === "0" || d.is_forward === false),
+    attachments: Array.isArray(d.attachments) ? d.attachments.length : -1,
+  };
+}
+
+export interface ReplyResult {
+  conversation_id: number;
+  number: number | null;
+  /** The reply thread (on the draft path: the draft's own id, now published). */
+  thread_id: number;
+  /** The conversation's customer email, the only recipient (no CC/BCC). */
+  sent_to: string;
+  sent_from_draft: boolean;
+  previous_status: string | null;
+  status: string | null;
+  assignee: string | null;
+  /** The reply as the re-read page shows it (plain text). */
+  body: string;
+  undo_note: string;
+  /** Set (true) only when a status/assignee change was logged during the call (the teammate's change was probably reverted). */
+  concurrent_change_detected?: true;
+  warning?: string;
+}
+
+export const REPLY_UNDO_NOTE =
+  "FreeScout queues the email for about 15 seconds before sending. Its Undo link is shown only to the session that " +
+  "sent the reply (this server's), not in a human's browser, so treat the reply as sent; it cannot be taken back.";
+
+function replyPossiblySent(to: string, conversationId: number, cause: unknown): FreeScoutError {
+  const msg = cause instanceof Error ? cause.message : String(cause);
+  return new FreeScoutError(
+    `${POSSIBLY_SENT} the reply to ${to} on conversation ${conversationId} may already have gone out. Do NOT retry ` +
+      `send_reply (FreeScout has no duplicate check for replies, a retry emails the customer again); check conversation ` +
+      `${conversationId} in FreeScout first. (${msg})`,
+  );
+}
+
+/** One address, as FreeScout would put it in To: no whitespace, names, lists or brackets. */
+const CUSTOMER_EMAIL_RE = /^[^\s<>,;"'@]+@[^\s<>,;"'@]+\.[^\s<>,;"'@]+$/;
+const sameEmail = (a: string | null | undefined, b: string) => (a ?? "").trim().toLowerCase() === b.toLowerCase();
+
+/**
+ * Text key for the duplicate check. FreeScout linkifies bare URLs (`www.x.com` -> `<a href="http://x.com">www.x.com</a>`),
+ * and htmlToText appends ` (href)` when the link text differs, so drop those suffixes on both sides before comparing.
+ */
+function dupKey(text: string): string {
+  return squish(text.replace(/\s*\((?:https?|ftp|mailto):[^\s()]*\)/gi, ""));
+}
+
+/**
+ * Selected option values of a reply-form <select> (FreeScout pre-fills To/Cc/Bcc for the reply editor). Scoped to
+ * FreeScout's own `form.form-reply`, never thread bodies (HTMLPurifier already strips <select> and ids from those;
+ * this keeps it true if a purifier setting ever changes).
+ */
+export function selectedValues(page: HtmlPage, sel: string): string[] | null {
+  const form = page.$("form.form-reply").filter((_, n) => !page.$(n).closest(".thread").length).first();
+  const el = form.find(sel).filter((_, n) => !page.$(n).closest(".thread").length).first();
+  if (!el.length) return null;
+  return el
+    .find("option")
+    .toArray()
+    .filter((o) => page.$(o).attr("selected") !== undefined)
+    .map((o) => (page.$(o).attr("value") ?? page.$(o).text()).trim())
+    .filter(Boolean);
+}
+
+export interface SendReplyOptions {
+  /** New reply text (plain text or simple HTML). Exactly one of body / draftThreadId. */
+  body?: string;
+  /** One of the agent's own reply drafts on this conversation, sent unchanged. */
+  draftThreadId?: number;
+  /** New status; omitted = the current status is kept. */
+  status?: ReplyStatus;
+}
+
+/**
+ * Email a reply to the conversation's customer. Refuses before any POST: gate off, another send_reply on the same
+ * conversation in flight, both or neither of body/draft, an invalid status, an unsent draft conversation, a Spam or
+ * non-email conversation, two different mailbox ids on the page or a mailbox outside FREESCOUT_REPLY_MAILBOXES, no
+ * customer email on the page, a reply form preset to another address; on the new-reply path a body equal to our own
+ * newest reply (likely duplicate); on the draft path a thread that is not the agent's own reply draft on this
+ * conversation, and (after the read-only load_draft) a forward draft, stored recipients other than exactly the
+ * customer, attachments, an empty body or a stored body that differs from the one the page shows.
+ * Then one pinned POST; afterwards the page is re-read and anything but the expected single published reply (to the
+ * same customer email) is DANGER.
+ */
+export async function sendReply(port: FreeScoutPort, conversationId: number, opts: SendReplyOptions, gate: ReplyGate): Promise<ReplyResult> {
+  if (!gate.enabled) throw new FreeScoutError("send_reply is disabled on this server (FREESCOUT_REPLY_ENABLED is not set)");
+  if (!isPosInt(conversationId)) throw new FreeScoutError("conversation_id must be a positive integer");
+  // Taken synchronously (before the first await), so two overlapping calls can never both reach the POST.
+  if (REPLY_IN_FLIGHT.has(conversationId)) {
+    throw new FreeScoutError(
+      `Another send_reply on conversation ${conversationId} is in progress. Nothing was sent by this call. Wait for that ` +
+        "call's result and do not send again unless the human asks.",
+    );
+  }
+  REPLY_IN_FLIGHT.add(conversationId);
+  try {
+    return await sendReplyUnlocked(port, conversationId, opts, gate);
+  } finally {
+    REPLY_IN_FLIGHT.delete(conversationId);
+  }
+}
+
+/**
+ * Conversations with a send_reply in flight in this process (all sessions: one process talks to one FreeScout, and
+ * two sessions replying to the same conversation at once is as much a duplicate as one session doing it twice).
+ */
+const REPLY_IN_FLIGHT = new Set<number>();
+
+async function sendReplyUnlocked(port: FreeScoutPort, conversationId: number, opts: SendReplyOptions, gate: ReplyGate): Promise<ReplyResult> {
+  const hasBody = typeof opts.body === "string" && opts.body.trim() !== "";
+  const hasDraft = opts.draftThreadId !== undefined && opts.draftThreadId !== null;
+  if (hasBody === hasDraft) {
+    throw new FreeScoutError(
+      "Pass exactly one of body (a new reply) or draft_thread_id (send one of your own saved drafts unchanged). Nothing was sent.",
+    );
+  }
+  if (hasDraft && !isPosInt(opts.draftThreadId)) throw new FreeScoutError("draft_thread_id must be a positive integer");
+  if (opts.status !== undefined && !Object.prototype.hasOwnProperty.call(REPLY_STATUSES, opts.status)) {
+    throw new FreeScoutError("status must be active, pending or closed (or omitted to keep the current status). Nothing was sent.");
+  }
+  const newBody = hasBody ? formatBody(opts.body!) : undefined;
+  const draftId = hasDraft ? opts.draftThreadId! : undefined;
+
+  // Fresh page: mailbox, status, assignee, customer email, threads and (via Session) a fresh CSRF token.
+  const { conv: before, page } = await loadConversation(port, conversationId);
+  refuseDraftConversation(before, "reply to");
+  const cur = requireWritable(before);
+  const refuse = (why: string) => new FreeScoutError(`Refusing to reply on conversation ${conversationId}: ${why}. Nothing was sent.`);
+  if (cur.status_value === STATUS_SPAM) throw refuse("it is marked as Spam; a human must decide in FreeScout whether it is spam");
+  if (!(cur.status_value in STATUS_BY_VALUE)) throw refuse(`its current status (${cur.status_value}) is not one this server knows`);
+  if (before.type !== "email") {
+    throw refuse(
+      `it is ${before.type ? `a ${before.type}` : "not an email"} conversation (FreeScout converts phone conversations to email on reply ` +
+        "and sends chat replies without an undo window); reply from the FreeScout UI",
+    );
+  }
+  // view.blade.php prints the mailbox twice: body[data-mailbox_id] (parsed) and #conv-list-col[data-mailbox_id].
+  const listMailbox = page.$("#conv-list-col").filter((_, n) => !page.$(n).closest(".thread").length).first().attr("data-mailbox_id");
+  if (listMailbox !== undefined && listMailbox.trim() !== String(cur.mailbox_id)) {
+    throw refuse(`the page shows two different mailbox ids (${cur.mailbox_id} and ${JSON.stringify(listMailbox)}), so the mailbox cannot be confirmed`);
+  }
+  if (!replyMailboxAllowed(gate, cur.mailbox_id)) {
+    throw refuse(
+      `its mailbox (id ${cur.mailbox_id}) is not in this server's FREESCOUT_REPLY_MAILBOXES (${gate.mailboxes.join(", ")}). Only the ` +
+        "server operator can change that list; do not look for a way around it",
+    );
+  }
+  const customerEmail = (before.customer?.email ?? "").trim();
+  if (!customerEmail) throw refuse("the conversation page does not show the customer's email address, so the recipient cannot be confirmed");
+  if (!CUSTOMER_EMAIL_RE.test(customerEmail)) throw refuse(`the customer's email as shown (${JSON.stringify(customerEmail)}) is not one plain address`);
+  // FreeScout sends to conversation.customer_email when `to` is omitted. The reply form's To select (rendered when the
+  // customer has several addresses) marks exactly that address as selected; it must be the one shown as the customer.
+  const toSel = selectedValues(page, 'select#to, select[name="to"]');
+  if (toSel !== null && (toSel.length !== 1 || !sameEmail(toSel[0], customerEmail))) {
+    throw refuse(
+      `the reply form's To field is preset to ${toSel.length ? toSel.join(", ") : "no address"}, not the customer email shown (${customerEmail}); ` +
+        "the recipient cannot be confirmed",
+    );
+  }
+  const droppedCc = [...(selectedValues(page, 'select#cc, select[name="cc[]"]') ?? []), ...(selectedValues(page, 'select#bcc, select[name="bcc[]"]') ?? [])];
+  const status = opts.status !== undefined ? REPLY_STATUSES[opts.status] : cur.status_value;
+
+  let body: string;
+  if (draftId !== undefined) {
+    const idx = before.threads.findIndex((t) => t.thread_id === draftId);
+    const t = before.threads[idx];
+    if (!t) throw refuse(`thread ${draftId} is not on this conversation (use get_conversation to see the thread ids)`);
+    if (t.type !== "draft") throw refuse(`thread ${draftId} is a ${t.type ?? "unknown"} thread, not a reply draft`);
+    if (!t.author || t.author.kind !== "user" || !t.author.is_current_user) {
+      const who = t.author?.name ? ` (FreeScout shows it as ${t.author.name}'s)` : "";
+      throw refuse(`draft ${draftId} was not written (or last edited) by the logged-in user${who}; only your own drafts can be sent`);
+    }
+    const stored = await loadDraft(port, draftId);
+    if (stored.thread_id !== draftId) throw refuse(`load_draft answered for thread ${stored.thread_id}, not ${draftId}`);
+    if (stored.is_forward) throw refuse(`draft ${draftId} is a forward draft, not a reply to the customer`);
+    if (!stored.to || !sameEmail(stored.to, customerEmail)) {
+      throw refuse(`draft ${draftId} is addressed to ${stored.to ?? "nobody"}, not the customer (${customerEmail})`);
+    }
+    if (stored.cc.length || stored.bcc.length) {
+      throw refuse(`draft ${draftId} has CC/BCC recipients (${[...stored.cc, ...stored.bcc].join(", ")}); this server only replies to the customer`);
+    }
+    if (stored.attachments !== 0) {
+      throw refuse(
+        stored.attachments > 0
+          ? `draft ${draftId} has attachments; this server does not send attachments. Send it from the FreeScout UI`
+          : `load_draft did not say whether draft ${draftId} has attachments`,
+      );
+    }
+    if (!stored.body.trim()) throw refuse(`draft ${draftId} is empty`);
+    // The "you" check above was made on the page; the text sent is the one stored now. If they differ, someone (a
+    // teammate) edited the draft in between, and what would go out is not what was checked or approved.
+    if (squish(htmlToText(stored.body)) !== squish(t.body)) {
+      throw refuse(
+        `the stored text of draft ${draftId} differs from the text the conversation page shows (it was probably edited in ` +
+          "between); re-read the conversation and ask the human to confirm the draft",
+      );
+    }
+    // FreeScout publishes the POSTED body, so the stored HTML is re-posted verbatim: what is sent is the draft as saved.
+    body = stored.body;
+  } else {
+    body = newBody!;
+    // FreeScout has no duplicate check for replies. The same text as our newest sent reply is almost always a retry.
+    // Internal notes, drafts and status lines do not reach the customer, so they must not hide that reply.
+    const last = [...before.threads].reverse().find((t) => t.type === "message" || t.type === "customer");
+    if (last?.type === "message" && last.author?.kind === "user" && last.author.is_current_user && dupKey(last.body) === dupKey(htmlToText(body))) {
+      throw refuse(
+        `the newest reply on this conversation (thread ${last.thread_id}) is already yours with the same text, so this looks ` +
+          "like a duplicate. Do not send it again unless the human confirms they want the customer to get it twice",
+      );
+    }
+  }
+
+  const known = new Set(before.threads.map((t) => t.thread_id).filter((x): x is number => x !== null));
+  const keptIds = before.threads
+    .filter((t) => t.thread_id !== null && t.type !== "lineitem" && t.thread_id !== draftId)
+    .map((t) => t.thread_id as number);
+  const lineitemsBefore = lineitemCount(before);
+  const path = draftId !== undefined ? "draft" : "new";
+
+  const form = buildReplyForm({
+    conversation_id: conversationId,
+    mailbox_id: cur.mailbox_id,
+    body,
+    user_id: cur.assignee_id,
+    status,
+    thread_id: draftId,
+  });
+  assertReplyForm(form, path);
+  // From here on the POST may have been processed. A failure without proof that FreeScout refused it must not read as
+  // "not sent", or the caller retries and the customer gets a second email (send_reply has no duplicate check).
+  let res: AjaxEnvelope;
+  try {
+    res = await port.ajaxPost<AjaxEnvelope>(AJAX, form);
+  } catch (e) {
+    // 403 (PermissionError) and logged-out (AuthError) answers come from middleware before the controller runs.
+    if (e instanceof PermissionError || e instanceof AuthError) throw e;
+    throw replyPossiblySent(customerEmail, conversationId, e);
+  }
+  try {
+    checkAjax(res, "send_reply");
+  } catch (e) {
+    // FreeScout's own {status:"error", msg} envelope is returned before anything is saved or queued.
+    if (e instanceof PermissionError) throw e;
+    if (isPlainObject(res) && res.status === "error" && typeof res.msg === "string" && res.msg.trim()) throw e;
+    throw replyPossiblySent(customerEmail, conversationId, e);
+  }
+
+  let after: ParsedConversation;
+  try {
+    after = await getConversation(port, conversationId);
+  } catch (e) {
+    throw replyPossiblySent(customerEmail, conversationId, e);
+  }
+  const danger = (what: string) =>
+    new FreeScoutError(
+      `DANGER: after send_reply on conversation ${conversationId}, ${what}. The reply was probably sent: do NOT retry. ` +
+        "A human must check this conversation in FreeScout immediately (FreeScout sends the email about 15 seconds after the POST).",
+    );
+  const fresh = after.threads.filter((t) => t.thread_id !== null && !known.has(t.thread_id) && t.type !== "lineitem" && t.type !== "customer");
+  let reply: ParsedThread | undefined;
+  if (path === "new") {
+    const wrong = fresh.filter((t) => t.type !== "message");
+    if (wrong.length) throw danger(`FreeScout created thread(s) ${wrong.map((t) => `${t.thread_id}:${t.type}`).join(", ")} that are not the reply`);
+    if (fresh.length > 1) throw danger(`${fresh.length} new replies appeared (${fresh.map((t) => t.thread_id).join(", ")}), expected exactly one`);
+    if (fresh.length === 0) {
+      throw danger("FreeScout accepted send_reply but no new reply appeared on the conversation");
+    }
+    reply = fresh[0]!;
+  } else {
+    if (fresh.length) throw danger(`new thread(s) ${fresh.map((t) => `${t.thread_id}:${t.type}`).join(", ")} appeared; publishing a draft must not create threads`);
+    reply = after.threads.find((t) => t.thread_id === draftId);
+    if (!reply) throw danger(`draft ${draftId} is no longer on the conversation`);
+    if (reply.type === "draft") {
+      throw danger(`FreeScout accepted send_reply but thread ${draftId} is still shown as a draft`);
+    }
+    if (reply.type !== "message") throw danger(`draft ${draftId} became a ${reply.type ?? "unknown"} thread, not a reply`);
+  }
+  const nowIds = new Set(after.threads.map((t) => t.thread_id).filter((x): x is number => x !== null));
+  const vanished = keptIds.filter((id) => !nowIds.has(id));
+  if (vanished.length) throw danger(`thread(s) ${vanished.join(", ")} disappeared`);
+  if (!reply.author || reply.author.kind !== "user" || !reply.author.is_current_user) {
+    throw danger(`the reply (thread ${reply.thread_id}) is not shown as written by the logged-in user`);
+  }
+  // FreeScout prints To on an agent reply only when it is not conversation.customer_email (or the customer has several
+  // addresses), and Cc whenever there is one. Either way it must be the customer alone.
+  if (reply.to.length && !(reply.to.length === 1 && sameEmail(reply.to[0], customerEmail))) {
+    throw danger(`the reply (thread ${reply.thread_id}) is addressed to ${reply.to.join(", ")}, not only ${customerEmail}`);
+  }
+  if (reply.cc.length) throw danger(`the reply (thread ${reply.thread_id}) has CC recipients ${reply.cc.join(", ")}`);
+  // sent_to is what the page showed before the POST; FreeScout used customer_email as it was when the POST ran.
+  if (!sameEmail(after.customer?.email, customerEmail)) {
+    throw danger(
+      `the conversation's customer email is now ${after.customer?.email ?? "not shown"}, not ${customerEmail} (it changed during the ` +
+        "call), so the reply may have gone to another address",
+    );
+  }
+  // FreeScout's send job reads the conversation's mailbox when it runs, so a move during the call changes the sender.
+  if (after.mailbox_id !== cur.mailbox_id || !replyMailboxAllowed(gate, after.mailbox_id)) {
+    throw danger(`the conversation is now in mailbox ${after.mailbox_id}, not ${cur.mailbox_id} (moved during the call)`);
+  }
+  const changed: string[] = [];
+  if (after.status_value !== status) changed.push(`status is ${after.status_value}, expected ${status}`);
+  if (after.assignee_id !== before.assignee_id) changed.push(`assignee ${before.assignee_id} -> ${after.assignee_id}`);
+  if (changed.length) throw danger(`the conversation is not as requested (${changed.join(", ")})`);
+
+  const result: ReplyResult = {
+    conversation_id: conversationId,
+    number: after.number,
+    thread_id: reply.thread_id!,
+    sent_to: customerEmail,
+    sent_from_draft: path === "draft",
+    previous_status: before.status,
+    status: after.status,
+    assignee: after.assignee,
+    body: reply.body,
+    undo_note: REPLY_UNDO_NOTE,
+  };
+  const warnings: string[] = [];
+  if (droppedCc.length) {
+    warnings.push(
+      `The conversation had CC/BCC addresses (${droppedCc.join(", ")}). This reply went to the customer only, and FreeScout ` +
+        "cleared the conversation's remembered CC/BCC list.",
+    );
+  }
+  // A reply never logs a status line (FreeScout sets the status directly; only changeStatus() adds one), so any new
+  // one means a teammate changed status/assignee meanwhile. Not an error: the email is out; an error invites a retry.
+  if (lineitemCount(after) > lineitemsBefore) {
+    result.concurrent_change_detected = true;
+    warnings.push(
+      `Someone else changed the status or assignee of conversation ${conversationId} while this reply was being sent. ` +
+        "The reply carried the status and assignee read beforehand, which FreeScout applies as sent, so their change was " +
+        `probably reverted. Ask the human to re-check the status and assignee of conversation ${conversationId} in FreeScout.`,
+    );
   }
   if (warnings.length) result.warning = warnings.join(" ");
   return result;

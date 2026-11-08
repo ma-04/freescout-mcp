@@ -1,4 +1,5 @@
 import type { FreeScoutClient } from "../client.js";
+import type { ReplyGate } from "../reply-gate.js";
 
 export interface ToolContext {
   client: FreeScoutClient;
@@ -9,4 +10,9 @@ export interface ToolContext {
   forwardAllow: readonly string[];
   /** FREESCOUT_STATS_DELAY_MS from the server environment: pause between consecutive ticket_volume and agent_stats requests (default 200). */
   statsDelayMs?: number;
+  /**
+   * FREESCOUT_REPLY_ENABLED / FREESCOUT_REPLY_MAILBOXES from the server's own environment (never from a request).
+   * send_reply is registered only when `reply.enabled`; absent = disabled.
+   */
+  reply?: ReplyGate;
 }

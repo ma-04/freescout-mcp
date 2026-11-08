@@ -11,8 +11,9 @@ export function registerSaveDraft(server: McpServer, { client }: ToolContext): v
       title: "Save reply draft",
       description:
         "Save a REPLY DRAFT on a conversation for a human to review. The draft appears in the FreeScout UI on the " +
-        "conversation (and in the mailbox's Drafts folder) where the human agent can edit and send it. This MCP " +
-        "server never sends it and has no send tool. Recipient defaults to the conversation's customer. To revise " +
+        "conversation (and in the mailbox's Drafts folder) where the human agent can edit and send it. Saving never " +
+        "sends anything; this server sends a draft only through send_reply, which exists only when the server operator " +
+        "enabled it. Recipient defaults to the conversation's customer. To revise " +
         "your draft pass the thread_id returned by the previous call; without thread_id a second, separate draft " +
         "is created. FreeScout lets anyone who can view the conversation edit any draft on it, so a thread_id " +
         "may also be a teammate's draft: only pass a thread_id you created or were asked to edit. Refuses unsent " +

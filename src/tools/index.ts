@@ -21,6 +21,7 @@ import { registerRemoveTag } from "./remove-tag.js";
 import { registerSatisfactionReport } from "./satisfaction-report.js";
 import { registerSaveDraft } from "./save-draft.js";
 import { registerSearchConversations } from "./search-conversations.js";
+import { registerSendReply } from "./send-reply.js";
 import { registerTicketVolume } from "./ticket-volume.js";
 import { registerTimeTrackingReport } from "./time-tracking-report.js";
 import { registerWaitingConversations } from "./waiting-conversations.js";
@@ -30,10 +31,12 @@ import { registerWhoami } from "./whoami.js";
  * Every tool lives in its own file and exports a register function; add it here.
  * Writes are limited to add_note (internal note), save_draft, discard_draft, add_tag (adds tags), remove_tag (removes
  * named tags from one conversation, one pinned form per tag), remove_note (deletes one of the agent's own plain
- * internal notes; pinned {action:'delete_thread', thread_id}), close_conversation (status -> Closed only; no reopen/pending/spam path) and, only when the
- * operator set FREESCOUT_FORWARD_ALLOW, forward_conversation (one allow-listed, non-customer recipient; pinned form).
+ * internal notes; pinned {action:'delete_thread', thread_id}), close_conversation (status -> Closed only; no reopen/pending/spam path),
+ * only when the operator set FREESCOUT_FORWARD_ALLOW, forward_conversation (one allow-listed, non-customer recipient; pinned
+ * form) and, only when the operator set FREESCOUT_REPLY_ENABLED=1, send_reply (emails the conversation's customer alone:
+ * a new reply or one of the agent's own drafts unchanged; optional FREESCOUT_REPLY_MAILBOXES; pinned form, no recipient fields).
  * list_tags, list_assignees, ticket_volume, waiting_conversations, customer_history and list_report_users are read-only (GET only). productivity_report and
- * satisfaction_report, conversations_report and time_tracking_report are read-only but send one report request per call (agent_stats one per bucket, paced), POST /reports/ajax, that only computes a report (assertReportForm; the session layer may retry it once after a CSRF refresh or re-login). There is deliberately no customer reply/send tool and no assign/reopen tool.
+ * satisfaction_report, conversations_report and time_tracking_report are read-only but send one report request per call (agent_stats one per bucket, paced), POST /reports/ajax, that only computes a report (assertReportForm; the session layer may retry it once after a CSRF refresh or re-login). Without FREESCOUT_REPLY_ENABLED there is no customer reply/send tool; there is no assign tool, and no reopen tool beyond send_reply's optional status.
  */
 const registrars: Array<(server: McpServer, ctx: ToolContext) => void> = [
   registerWhoami,
@@ -66,6 +69,8 @@ export function registerTools(server: McpServer, ctx: ToolContext): void {
   for (const r of registrars) r(server, ctx);
   // Outbound email to a third party: only when the server operator configured an allow-list.
   if (ctx.forwardAllow.length > 0) registerForwardConversation(server, ctx);
+  // Email to the customer: only when the server operator enabled it (server environment, never a request header).
+  if (ctx.reply?.enabled === true) registerSendReply(server, ctx);
 }
 
 export type { ToolContext };

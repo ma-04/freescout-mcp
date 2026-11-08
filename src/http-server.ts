@@ -13,6 +13,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { FreeScoutClient } from "./client.js";
 import { log as defaultLog, redact, type Logger } from "./log.js";
+import type { ReplyGate } from "./reply-gate.js";
 import { Session } from "./session.js";
 import { registerTools } from "./tools/index.js";
 import { VERSION } from "./version.js";
@@ -51,6 +52,11 @@ export interface HttpServerOptions {
   forwardAllow?: readonly string[];
   /** FREESCOUT_STATS_DELAY_MS: pause between consecutive ticket_volume and agent_stats requests (default 200 ms). */
   statsDelayMs?: number;
+  /**
+   * Parsed FREESCOUT_REPLY_ENABLED / FREESCOUT_REPLY_MAILBOXES from the server environment (default: disabled, so
+   * send_reply is not registered). Shared by every session; no request header can set or widen it.
+   */
+  reply?: ReplyGate;
   fetchImpl?: typeof fetch;
   logger?: Logger;
   now?: () => number;
@@ -104,6 +110,10 @@ export function createMcpHttpServer(opts: HttpServerOptions): McpHttpServer {
   const tokenDigest = digestOf(hmacKey, opts.token);
   const sessions = new Map<string, Entry>();
   const forwardAllow = Object.freeze([...(opts.forwardAllow ?? [])]);
+  const reply: ReplyGate = Object.freeze({
+    enabled: opts.reply?.enabled === true,
+    mailboxes: Object.freeze([...(opts.reply?.mailboxes ?? [])]) as number[],
+  });
   let pending = 0;
 
   const forget = (id: string, why: string): Entry | undefined => {
@@ -144,7 +154,7 @@ export function createMcpHttpServer(opts: HttpServerOptions): McpHttpServer {
       now,
     });
     const server = new McpServer({ name: "freescout-mcp", version: VERSION });
-    registerTools(server, { client: new FreeScoutClient(session), forwardAllow, statsDelayMs: opts.statsDelayMs });
+    registerTools(server, { client: new FreeScoutClient(session), forwardAllow, statsDelayMs: opts.statsDelayMs, reply });
     const transport: StreamableHTTPServerTransport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       enableJsonResponse: true,

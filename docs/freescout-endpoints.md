@@ -343,11 +343,112 @@ errors `Thread not found`, `Thread is not in a draft state`, `Not enough permiss
 Discard: `action=discard_draft`, `thread_id` → `{"status":"success","msg":""}` (deletes the draft thread; if the whole
 conversation is a draft it deletes the conversation and returns `redirect_url`). Unknown `thread_id` also returns success.
 
-### 5.3 NEVER send (reference only)
-- `action=send_reply` **without** `is_note` (or `is_note=` / `0`… note: `"0"` is `empty()` in PHP, so `is_note=0`
-  is also a customer reply): creates `TYPE_MESSAGE`, fires `UserReplied` → email to customer after the undo window.
-- `action=send_reply` with `thread_id=<draft id>` (no `is_note`): publishes the draft = sends it.
-- `action=send_reply` with `is_create=1` / no `conversation_id` (new outbound conversation).
+### 5.3 Customer reply: `action=send_reply` without `is_note` (gated; `send_reply`, 2026-11-07)
+Source: FreeScout 1.8.248 in the demo container (`/www/html`, read 2026-11-07, not modified):
+`app/Http/Controllers/ConversationsController.php` `ajax()` case `send_reply` (line 707), `load_draft` (1762),
+`save_draft` (1428), `undoReply()` (3407), `getUndoTimeout()` (3636); `app/Listeners/SendReplyToCustomer.php`;
+`app/Conversation.php` `changeStatus()` (2083); `app/Thread.php` `getActionPerson()` (640), `getToFirst()` (437);
+`resources/views/conversations/partials/thread.blade.php`, `view.blade.php`, `customer_sidebar.blade.php`. Exercised
+live on the demo (2026-11-07/08, restricted agent, outbound SMTP dead-ended): a new reply and a sent own draft each
+became one published `type=2` thread with one `send_logs` row, to the customer only.
+
+**New reply** (no `thread_id`). Required: `mailbox_id` (`Mailbox::findOrFail` + `can('view')`), `conversation_id`
+(`can('view')`), `body` (`'body' => 'required|string'`, line ~818; `cc`/`bcc` `nullable|array`). Server behaviour:
+- `is_note` empty/absent/`0` = customer reply (line 729). `subtype=1` would make it a forward (§5.5), `is_create` a new
+  conversation; `type` overrides the conversation type.
+- **Recipient**: `to` omitted ⇒ `$to = $conversation->customer_email` (line 1031). The thread stores `to = [$to]`
+  (1128), `cc = request cc`, `bcc = request bcc` (1131-1132), so with neither posted the email goes to the
+  conversation's customer email alone. Side effect: `$conversation->setCc(array_diff(request cc, [$to]))` (1046) and
+  `setBcc(request bcc)` (1051) run for every reply, so a reply without `cc[]`/`bcc[]` **clears the CC/BCC FreeScout
+  remembered on the conversation** (the UI normally pre-fills them into the reply form).
+- **Status**: `$conversation->status = (int)status ?: current` (987): omitted keeps it, but `thread->status` then
+  becomes 0 (1116), so send it. Closing sets `closed_by_user_id`/`closed_at`. A status change here fires
+  `ConversationStatusChanged` (listener `UpdateMailboxCounters` only) and **adds no status line**: lineitems come only
+  from `Conversation::changeStatus()` (2083).
+- **Assignee**: unchanged when `user_id` equals the current assignee; `-1` unassigns; omitted ⇒ `userHasAccess(0)` ⇒
+  HTTP 500 on assigned conversations (same quirk as §5.1). There is **no** auto-assign to the replier. Side effect:
+  the replier follows the conversation when it is assigned to someone else (1280).
+- Creates one thread: `TYPE_MESSAGE` (2), `STATE_PUBLISHED` (2), `created_by_user_id` = the user, `user_id` = the
+  assignee (1115). `threads_count` and `last_reply_at` are updated, the conversation leaves Drafts.
+- Phone conversations whose customer has an email are converted to email conversations (927); chat conversations in
+  chat mode cannot be undone (`can_undo = false`, 1284: 1 s instead of 15 s).
+- Email: `UserReplied` (1313) → the `SendReplyToCustomer` listener queues a `SendReplyToCustomer` job delayed by
+  `Conversation::UNDO_TIMOUT` = **15 s** (`conversation.send_reply_to_customer_delay` filter). `undoReply()`
+  (`GET /conversation/undo-reply/{thread_id}/{token}`, own reply, within 15 s) turns the thread back into a draft and
+  deletes the queued job. The link exists only in the sending session's flash message (it carries that session's CSRF
+token), so a reply sent by the MCP cannot be undone from a human's browser. The MCP never calls it.
+- **No duplicate check**: "You've already sent this message just recently." exists only in `save_draft` (1488, last
+  thread by the same user with an identical body). Two identical `send_reply` POSTs send two emails.
+- Response: `{"status":"success","msg":"","redirect_url":"…"}`; the thread id is not returned. Errors (HTTP 200,
+  `status:"error"`): `Not enough permissions`, `Incorrect thread`, `Message has been already sent. Please discard this
+  draft.`, validation text, `Message is too large — …`.
+
+**Draft publish** (`thread_id` = a reply draft). `Thread::find(thread_id)`; a thread on another conversation ⇒
+`Incorrect thread`; `state == published` ⇒ `Message has been already sent…` (774-780). Otherwise:
+- It converts the **same thread in place** (no new thread): `type = MESSAGE` (NOTE if the request is a forward or the
+  conversation is phone), `state = published`, `created_at = now`, `created_by_user_id` = the publisher.
+- It stores the **POSTED body** (`$thread->body = $body`, 1124), not the stored draft body; `body` is still required.
+- `to`/`cc`/`bcc` come from the **request** (to defaults to customer_email), not from the stored draft; omitting them
+  resets them.
+- A forward draft is only a forward if the request carries `subtype=1` (`$is_forward` comes from the request); without
+  it a stored forward draft would be published as a reply to the customer with its forward text.
+- Permission: only `can('view', conversation)`. There is **no author check**: anyone who can view the conversation can
+  publish anyone's draft. The page shows a draft's author as the last editor (`edited_by_user_id`) or the creator
+  (`getActionPerson()`), "you" for the logged-in user.
+- Draft attachments stay linked to the thread (`attachments_all` not posted ⇒ nothing deleted).
+- `from` (the mailbox alias the email is sent from) is only set when `from_alias` is posted (1198); the MCP never
+  posts it, so the draft's stored alias is kept and the email goes out from it, as it would from the UI.
+
+`load_draft` (§5.2) answers `{thread_id, from_alias, to: getToFirst() (first address only), cc: [], bcc: [], body,
+is_forward: 0|1, attachments: […]}`; it requires `state == draft` and `can('view')`.
+
+**What the MCP sends** (tool `send_reply`, only when `FREESCOUT_REPLY_ENABLED=1`):
+
+| Field | Value |
+|---|---|
+| `action` | `send_reply` |
+| `conversation_id`, `mailbox_id` | the conversation and its mailbox (from the page, `body[data-mailbox_id]`; `#conv-list-col[data-mailbox_id]`, view.blade.php line 26, must not differ) |
+| `body` | new reply: `formatBody(body)`; draft: the stored HTML from `load_draft`, verbatim |
+| `user_id` | current assignee, `-1` when unassigned (assignee unchanged) |
+| `status` | requested `1`/`2`/`3`, or the current status |
+| `thread_id` | draft path only |
+
+`assertReplyForm` (right before the POST) allows exactly these keys and refuses `is_note`, `subtype`, `is_create`, `to`,
+`to_email[]`, `cc[]`, `bcc[]`, `conv_history`, `after_send`, `type`, `from_alias`, attachments and anything unknown.
+Before the POST the MCP refuses: gate off, another `send_reply` on the same conversation still in flight in this
+process (a lock taken before the first request, for every session), a mailbox outside `FREESCOUT_REPLY_MAILBOXES` or
+two different mailbox ids on the page, Spam, non-email (phone/chat) and unsent draft conversations, no customer email
+on the page (`.customer-email a.contact-main`, which the sidebar renders first for `conversation.customer_email`), a
+reply form `select[name=to]` preset to another address. New-reply path: the newest thread (ignoring status lines and
+drafts) being a `message` by the logged-in user with the same plain text (whitespace normalised) is refused as a likely
+duplicate, since FreeScout has none. Draft path: the thread must be on the page, `thread-type-draft`, shown as "you"
+(the last editor, `getActionPerson()`); then `load_draft` (pinned `{action:'load_draft', thread_id}`): `is_forward` 0,
+`to` equal to the customer email (case-insensitive), `cc`/`bcc` empty, no attachments, non-empty body, and the stored
+body as plain text equal to the draft text the page showed (otherwise someone edited it in between). Afterwards the
+page is re-read: new reply = exactly one new `message` thread by the logged-in user; draft = the same id now
+`message`, no new thread; no other thread gone, a rendered To (the blade prints To on a reply only when it is not
+`customer_email`) must be the customer alone, no Cc, the customer email unchanged (it is what `sent_to` reports),
+status as requested, assignee unchanged, otherwise `DANGER`. Failures after dispatch without a clean FreeScout error
+are `POSSIBLY SENT:` (as §5.5). A 419 (CSRF) or logged-out answer comes from middleware before the controller, so the
+session's single retry cannot send twice. A new status line means a teammate changed status/assignee; the reply posts
+the status and assignee read beforehand, which FreeScout applies, so their change was probably reverted
+(concurrent-change warning).
+
+Known limits. (1) English FreeScout UI: the author "you" (`__('you')`) and the conversation-type class
+(`conv-type-{{ strtolower(__('Email')) }}`, view.blade.php line 39) are translated in other locales. Drafts are then
+always refused; new replies are refused unless the locale also translates "Email" as "Email" (da, fr, it, ro, sk do).
+Fails closed; the after-state checks use classes, hrefs and attributes, not English text. A teammate whose display
+name is literally "You" is indistinguishable from `__('you')` on a draft (plain text, no profile link), so their
+draft would pass the own-draft check; it still goes only to the customer.
+(2) `sent_to` is the first `.contact-main` the sidebar shows. `profile_snippet.blade.php` lists the customer's Email
+records with `conversation.customer_email` first only when it is one of them; if `customer_email` has no matching
+Email record of the customer, the page shows another address while FreeScout sends to `customer_email`. The reply
+form's To select (rendered when the customer has several addresses) catches most of these; the rest is not
+detectable from the page. A conversation without a customer has no sidebar and is refused.
+
+### 5.3a NEVER send (reference only)
+- `action=send_reply` without `is_note` from anything but the pinned reply form above (only when the operator enabled
+  it), including `is_create=1` / no `conversation_id` (new outbound conversation) and any `to`/`cc`/`bcc`.
 - `action=send_reply` with `subtype=1` from anything but the pinned forward form of §5.5 (allow-listed recipient,
   `is_note=1`, exactly one `to_email[]`, no `to`/`cc`/`bcc`/`thread_id`). The note form (§5.1) never carries `subtype`.
 - `action=conversation_change_status` with any status other than `3` (closed), see §5.4: no reopen, pending, spam or

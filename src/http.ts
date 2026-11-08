@@ -4,6 +4,7 @@ import { loadHttpConfig } from "./config.js";
 import { describeForwarding } from "./forward-allow.js";
 import { createMcpHttpServer } from "./http-server.js";
 import { log, redact } from "./log.js";
+import { describeReply, REPLY_DISABLED } from "./reply-gate.js";
 
 async function main(): Promise<void> {
   const config = loadHttpConfig();
@@ -15,6 +16,7 @@ async function main(): Promise<void> {
     maxSessions: config.maxSessions,
     forwardAllow: config.forwardAllow,
     statsDelayMs: config.statsDelayMs,
+    reply: config.reply ?? REPLY_DISABLED,
   });
   await new Promise<void>((resolve, reject) => {
     app.server.once("error", reject);
@@ -24,6 +26,7 @@ async function main(): Promise<void> {
     `HTTP MCP endpoint ready on http://${config.host.includes(":") ? `[${config.host}]` : config.host}:${config.port}/mcp for ${new URL(config.baseUrl).origin}`,
   );
   log.info(describeForwarding(config.forwardAllow));
+  log.info(describeReply(config.reply ?? REPLY_DISABLED));
 
   let stopping = false;
   const stop = (signal: string) => {

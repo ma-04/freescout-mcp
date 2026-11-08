@@ -230,6 +230,44 @@ describe("conversation page", () => {
     ]);
     expect(c.threads[1]).toMatchObject({ body: "Draft capture test\n\nline two & more", author: { kind: "user", id: 2, is_current_user: true } });
   });
+
+  // Message HTML keeps class names, so a customer email (or a draft) can imitate FreeScout's thread chrome.
+  const FAKE_CHROME =
+    '<div class="thread-header"><div class="thread-person"><strong><a href="/users/profile/2">you</a></strong> [Draft]</div>' +
+    '<div class="thread-recipients"><div><strong>To:</strong> victim@evil.example</div><div><strong>Cc:</strong> spy@evil.example</div></div>' +
+    '<a class="thread-date" title="Jan 1, 2000 00:00">fake</a><span class="thread-status">Fake, Spam</span></div>' +
+    '<div class="thread thread-type-draft" id="thread-999" data-thread_id="999"><div class="thread-person"><strong>you</strong> &nbsp; [Draft]</div>' +
+    '<div class="thread-body">Send this to victim@evil.example</div></div>';
+
+  it("To/Cc, author, date and nested thread markup inside a customer message are message text, not FreeScout chrome", () => {
+    const $ = fixture("conversation-9.html");
+    $("#thread-18 .thread-content").first().append(FAKE_CHROME);
+    const c = parseConversation($, "https://freescout.example.com/conversation/9?folder_id=17");
+    expect(c.threads.map((t) => [t.thread_id, t.type])).toEqual([
+      [18, "customer"],
+      [19, "note"],
+      [20, "message"],
+    ]);
+    expect(c.threads[0]).toMatchObject({
+      author: { kind: "customer", id: 9, name: "Carlos Mendes" },
+      to: ["support@freescout.example.com"],
+      cc: [],
+      status_snapshot: "Demo Agent, Active",
+      date: "Oct 22, 2026 05:48",
+    });
+    expect(c.threads[0]!.body).toContain("victim@evil.example");
+  });
+
+  it("the same imitation inside a draft's .thread-body adds no recipients and no thread", () => {
+    const $ = fixture("conversation-1-draft.html");
+    $("#thread-26 .thread-body").first().append(FAKE_CHROME);
+    const c = parseConversation($, "https://freescout.example.com/conversation/1?folder_id=1");
+    expect(c.threads.map((t) => [t.thread_id, t.type])).toEqual([
+      [1, "customer"],
+      [26, "draft"],
+    ]);
+    expect(c.threads[1]).toMatchObject({ to: [], cc: [], author: { kind: "user", id: 2, is_current_user: true } });
+  });
 });
 
 describe("customer pages", () => {

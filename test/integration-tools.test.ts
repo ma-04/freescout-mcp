@@ -6,6 +6,11 @@
  *
  * With FREESCOUT_DEMO_SSH set, the note test also checks the database over ssh (threads.type and
  * send_logs). It writes notes/drafts only on Support conversation 1.
+ *
+ * send_reply EMAILS THE CUSTOMER, so its live tests run only with an extra test-only opt-in, FREESCOUT_REPLY_LIVE_TEST=1,
+ * on top of the variables above (demo only, never production). It is deliberately not the server's
+ * FREESCOUT_REPLY_ENABLED, so an operator who has replies enabled does not send email by running the note/draft tests. They reply on Support conversation 1; reseed afterwards
+ * (demo/reset.sh), because the replies stay in the conversation.
  */
 import { execFileSync } from "node:child_process";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -18,6 +23,7 @@ import * as stats from "../src/stats.js";
 
 const { FREESCOUT_URL: url, FREESCOUT_USER: user, FREESCOUT_PASSWORD: password, FREESCOUT_DEMO_SSH: sshHost } = process.env;
 const enabled = Boolean(url && user && password);
+const replyLive = enabled && process.env.FREESCOUT_REPLY_LIVE_TEST === "1";
 
 /** Run SQL in the demo DB container; the password is read from the server's .env, never sent from here. */
 function sql(query: string): string[][] {
@@ -184,5 +190,55 @@ describe.skipIf(!enabled)("live tools as the restricted agent", () => {
   it("writes on Billing conversation 10 are refused", async () => {
     await expect(ops.addNote(c, 10, "should not work")).rejects.toBeInstanceOf(PermissionError);
     await expect(ops.saveDraft(c, 10, "should not work")).rejects.toBeInstanceOf(PermissionError);
+  }, 60_000);
+});
+
+describe.skipIf(!replyLive)("live send_reply as the restricted agent (sends email; demo only)", () => {
+  let c: FreeScoutClient;
+  const gate = { enabled: true, mailboxes: [1] };
+  beforeAll(() => {
+    c = new FreeScoutClient(new Session({ baseUrl: url!, user, password, logger: silentLogger, timeoutMs: 20_000 }));
+  });
+
+  /** After FreeScout's 15 s undo window: the thread is a published message and every send_logs row is the customer. */
+  async function checkDb(threadId: number, customerEmail: string, dbNow: string | undefined): Promise<void> {
+    if (!sshHost) return;
+    await new Promise((r) => setTimeout(r, 25_000));
+    const [row] = sql(`select type, state, ifnull(subtype,'NULL') from threads where id = ${threadId};`);
+    expect(row).toEqual(["2", "2", "NULL"]); // Thread::TYPE_MESSAGE, STATE_PUBLISHED, no subtype
+    const [conv] = sql(`select ifnull(cc,'NULL'), ifnull(bcc,'NULL') from threads where id = ${threadId};`);
+    expect(conv!.map((v) => (v === "NULL" || v === "[]" ? "" : v))).toEqual(["", ""]);
+    const logs = sql(`select id, email, mail_type, status from send_logs where thread_id = ${threadId};`);
+    expect(logs.every((l) => l[1]?.toLowerCase() === customerEmail.toLowerCase())).toBe(true);
+    const others = sql(`select email from send_logs where created_at >= '${dbNow}' and mail_type = 1;`); // MAIL_TYPE_EMAIL_TO_CUSTOMER
+    expect(others.every((l) => l[0]?.toLowerCase() === customerEmail.toLowerCase())).toBe(true);
+    console.log(`[db] reply ${threadId}: threads=${JSON.stringify(row)}; send_logs: ${JSON.stringify(logs)}`);
+  }
+
+  it("new reply on conversation 1: one message to the customer only, status/assignee kept", async () => {
+    const before = await ops.getConversation(c, 1);
+    const dbNow = sshHost ? sql("select now();")[0]![0]! : undefined;
+    const r = await ops.sendReply(c, 1, { body: `Integration test reply ${Date.now()}` }, gate);
+    expect(r).toMatchObject({ conversation_id: 1, sent_to: before.customer!.email, sent_from_draft: false, status: before.status });
+    const after = await ops.getConversation(c, 1);
+    expect(after.threads.find((t) => t.thread_id === r.thread_id)?.type).toBe("message");
+    expect(after.assignee_id).toBe(before.assignee_id);
+    await checkDb(r.thread_id, before.customer!.email!, dbNow);
+  }, 120_000);
+
+  it("save_draft then send it unchanged: the same thread becomes the message", async () => {
+    const before = await ops.getConversation(c, 1);
+    const dbNow = sshHost ? sql("select now();")[0]![0]! : undefined;
+    const d = await ops.saveDraft(c, 1, `Integration draft to send ${Date.now()}`);
+    const r = await ops.sendReply(c, 1, { draftThreadId: d.thread_id }, gate);
+    expect(r).toMatchObject({ thread_id: d.thread_id, sent_from_draft: true, sent_to: before.customer!.email });
+    await checkDb(d.thread_id, before.customer!.email!, dbNow);
+  }, 120_000);
+
+  it("refusals post nothing: Billing conversation 10 is outside the mailbox list; a customer thread is not a draft", async () => {
+    await expect(ops.sendReply(c, 10, { body: "should not work" }, gate)).rejects.toThrow();
+    const conv = await ops.getConversation(c, 1);
+    const customer = conv.threads.find((t) => t.type === "customer" && t.thread_id !== null)!;
+    await expect(ops.sendReply(c, 1, { draftThreadId: customer.thread_id! }, gate)).rejects.toThrow(/not a reply draft/);
   }, 60_000);
 });
