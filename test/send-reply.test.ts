@@ -459,13 +459,13 @@ describe("sendReply: after-state DANGER", () => {
     await expect(reply(9, { draftThreadId: 50 })).rejects.toThrow(/^DANGER: .*new thread\(s\) \d+:message appeared/);
     fs.misbehave = { replyLeavesDraft: true };
     withDraft(8);
-    await expect(reply(8, { draftThreadId: draftOf(8) })).rejects.toThrow(/still shown as a draft.*Do NOT retry/);
+    await expect(reply(8, { draftThreadId: draftOf(8) })).rejects.toThrow(/^DANGER: .*still shown as a draft.*do NOT retry/);
   });
 
   it("FreeScout says success but nothing appeared -> error saying do not retry", async () => {
     fs.addConv(9);
     fs.misbehave.replyNoop = true;
-    await expect(reply(9, { body: "x" })).rejects.toThrow(/accepted send_reply but no new reply appeared.*Do NOT retry/);
+    await expect(reply(9, { body: "x" })).rejects.toThrow(/^DANGER: .*accepted send_reply but no new reply appeared.*do NOT retry/);
   });
 });
 
@@ -540,12 +540,24 @@ describe("sendReply: duplicate sends, edited drafts, mailbox and customer checks
     expect(fs.replies).toHaveLength(3);
   });
 
+  it("ignores To/CC selects and a mailbox marker written inside a thread body (only FreeScout's own reply form counts)", async () => {
+    const spoof =
+      '<select id="to"><option value="attacker@evil.example" selected>x</option></select>' +
+      '<select id="cc"><option value="spy@evil.example" selected>y</option></select><div id="conv-list-col" data-mailbox_id="99"></div>';
+    fs.addConv(9, { threads: [{ id: 40, type: "customer", body: `<p>Form bug:</p>${spoof}`, to: ["support@fake.example"] }], list_mailbox_id: null });
+    const r = await reply(9, { body: "Looking into it." });
+    expect(r).toMatchObject({ sent_to: CUSTOMER });
+    expect(r.warning ?? "").not.toMatch(/evil/);
+    expect(fs.replies).toHaveLength(1);
+  });
+
   it("refuses a body equal to our own newest reply (whitespace normalised); a teammate's, an older or a different one is fine", async () => {
     fs.addConv(9, {
       threads: [
         { id: 40, type: "customer", body: "Help?", to: ["support@fake.example"] },
         { id: 41, type: "message", body: "<p>Thanks,   fixed.</p>", to: [CUSTOMER] },
         { type: "lineitem", body: "You marked as Pending" },
+        { id: 43, type: "note", body: "<p>Processed in the billing dashboard.</p>" },
         { id: 42, type: "draft", body: "<p>unsent</p>", to: [CUSTOMER] },
       ],
     });

@@ -2163,9 +2163,13 @@ function replyPossiblySent(to: string, conversationId: number, cause: unknown): 
 const CUSTOMER_EMAIL_RE = /^[^\s<>,;"'@]+@[^\s<>,;"'@]+\.[^\s<>,;"'@]+$/;
 const sameEmail = (a: string | null | undefined, b: string) => (a ?? "").trim().toLowerCase() === b.toLowerCase();
 
-/** Selected option values of a reply-form <select> (FreeScout pre-fills To/Cc/Bcc for the reply editor). */
+/**
+ * Selected option values of a reply-form <select> (FreeScout pre-fills To/Cc/Bcc for the reply editor). Scoped to
+ * FreeScout's own `form.form-reply`, never thread bodies (HTMLPurifier already strips <select> and ids from those;
+ * this keeps it true if a purifier setting ever changes).
+ */
 function selectedValues(page: HtmlPage, sel: string): string[] | null {
-  const el = page.$(sel).first();
+  const el = page.$("form.form-reply").first().find(sel).first();
   if (!el.length) return null;
   return el
     .find("option")
@@ -2248,7 +2252,7 @@ async function sendReplyUnlocked(port: FreeScoutPort, conversationId: number, op
     );
   }
   // view.blade.php prints the mailbox twice: body[data-mailbox_id] (parsed) and #conv-list-col[data-mailbox_id].
-  const listMailbox = page.$("#conv-list-col").first().attr("data-mailbox_id");
+  const listMailbox = page.$("#conv-list-col").filter((_, n) => !page.$(n).closest(".thread").length).first().attr("data-mailbox_id");
   if (listMailbox !== undefined && listMailbox.trim() !== String(cur.mailbox_id)) {
     throw refuse(`the page shows two different mailbox ids (${cur.mailbox_id} and ${JSON.stringify(listMailbox)}), so the mailbox cannot be confirmed`);
   }
@@ -2313,7 +2317,8 @@ async function sendReplyUnlocked(port: FreeScoutPort, conversationId: number, op
   } else {
     body = newBody!;
     // FreeScout has no duplicate check for replies. The same text as our newest sent reply is almost always a retry.
-    const last = [...before.threads].reverse().find((t) => t.type !== "lineitem" && t.type !== "draft");
+    // Internal notes, drafts and status lines do not reach the customer, so they must not hide that reply.
+    const last = [...before.threads].reverse().find((t) => t.type === "message" || t.type === "customer");
     if (last?.type === "message" && last.author?.kind === "user" && last.author.is_current_user && squish(last.body) === squish(htmlToText(body))) {
       throw refuse(
         `the newest reply on this conversation (thread ${last.thread_id}) is already yours with the same text, so this looks ` +
@@ -2375,10 +2380,7 @@ async function sendReplyUnlocked(port: FreeScoutPort, conversationId: number, op
     if (wrong.length) throw danger(`FreeScout created thread(s) ${wrong.map((t) => `${t.thread_id}:${t.type}`).join(", ")} that are not the reply`);
     if (fresh.length > 1) throw danger(`${fresh.length} new replies appeared (${fresh.map((t) => t.thread_id).join(", ")}), expected exactly one`);
     if (fresh.length === 0) {
-      throw new FreeScoutError(
-        `FreeScout accepted send_reply but no new reply appeared on conversation ${conversationId}. Do NOT retry; check the ` +
-          "conversation in the FreeScout UI.",
-      );
+      throw danger("FreeScout accepted send_reply but no new reply appeared on the conversation");
     }
     reply = fresh[0]!;
   } else {
@@ -2386,10 +2388,7 @@ async function sendReplyUnlocked(port: FreeScoutPort, conversationId: number, op
     reply = after.threads.find((t) => t.thread_id === draftId);
     if (!reply) throw danger(`draft ${draftId} is no longer on the conversation`);
     if (reply.type === "draft") {
-      throw new FreeScoutError(
-        `FreeScout accepted send_reply but thread ${draftId} is still shown as a draft on conversation ${conversationId}. Do NOT ` +
-          "retry; check the conversation in the FreeScout UI.",
-      );
+      throw danger(`FreeScout accepted send_reply but thread ${draftId} is still shown as a draft`);
     }
     if (reply.type !== "message") throw danger(`draft ${draftId} became a ${reply.type ?? "unknown"} thread, not a reply`);
   }
