@@ -46,6 +46,13 @@ export function parseReplyGate(env: { FREESCOUT_REPLY_ENABLED?: string; FREESCOU
     }
     if (!mailboxes.includes(n)) mailboxes.push(n);
   }
+  // Set but nothing parsed (e.g. "," from an empty ${VAR} interpolation) must not silently mean "every mailbox".
+  if (!mailboxes.length && (env.FREESCOUT_REPLY_MAILBOXES ?? "").trim() !== "") {
+    throw new Error(
+      `FREESCOUT_REPLY_MAILBOXES: ${JSON.stringify(env.FREESCOUT_REPLY_MAILBOXES)} lists no mailbox ids. Use comma-separated ids ` +
+        "(e.g. 1,3), or leave it unset/empty to allow every mailbox the account can reply in.",
+    );
+  }
   if (!enabled && mailboxes.length) {
     return {
       enabled: false,

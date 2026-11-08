@@ -32,10 +32,12 @@ export function registerSendReply(server: McpServer, { client, reply }: ToolCont
         "Refuses Spam, non-email and unsent draft conversations, pages that show no customer email, other users' drafts, " +
         "forward drafts and drafts with other recipients or attachments, a second send_reply on a conversation while one " +
         "is in progress, and a body equal to your own newest reply there (likely a duplicate: ask the human). Works with " +
-        "an English FreeScout UI only; with other languages every reply is refused. The conversation is re-read afterwards and the " +
+        "an English FreeScout UI (other languages: drafts are always refused as not yours, and new replies may be refused). The " +
+        "conversation is re-read afterwards and the " +
         "call fails loudly (DANGER) if anything but the one reply appeared. If an error starts with \"POSSIBLY SENT:\" " +
         "the email may already be out: NEVER retry (FreeScout has no duplicate check, the customer would get it twice); " +
-        "tell the human to check the conversation. A warning with concurrent_change_detected means a teammate changed " +
+        "tell the human to check the conversation. If the call times out or fails without a FreeScout message, also check the " +
+        "conversation (get_conversation) before anything else; never resend blindly. A warning with concurrent_change_detected means a teammate changed " +
         "status/assignee meanwhile and the reply probably reverted it; tell the human to re-check. " + PERMISSION_NOTE,
       inputSchema: {
         conversation_id: z.number().int().positive().describe("Conversation id."),

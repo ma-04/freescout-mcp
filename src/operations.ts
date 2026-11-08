@@ -2164,6 +2164,14 @@ const CUSTOMER_EMAIL_RE = /^[^\s<>,;"'@]+@[^\s<>,;"'@]+\.[^\s<>,;"'@]+$/;
 const sameEmail = (a: string | null | undefined, b: string) => (a ?? "").trim().toLowerCase() === b.toLowerCase();
 
 /**
+ * Text key for the duplicate check. FreeScout linkifies bare URLs (`www.x.com` -> `<a href="http://x.com">www.x.com</a>`),
+ * and htmlToText appends ` (href)` when the link text differs, so drop those suffixes on both sides before comparing.
+ */
+function dupKey(text: string): string {
+  return squish(text.replace(/\s*\((?:https?|ftp|mailto):[^\s()]*\)/gi, ""));
+}
+
+/**
  * Selected option values of a reply-form <select> (FreeScout pre-fills To/Cc/Bcc for the reply editor). Scoped to
  * FreeScout's own `form.form-reply`, never thread bodies (HTMLPurifier already strips <select> and ids from those;
  * this keeps it true if a purifier setting ever changes).
@@ -2320,7 +2328,7 @@ async function sendReplyUnlocked(port: FreeScoutPort, conversationId: number, op
     // FreeScout has no duplicate check for replies. The same text as our newest sent reply is almost always a retry.
     // Internal notes, drafts and status lines do not reach the customer, so they must not hide that reply.
     const last = [...before.threads].reverse().find((t) => t.type === "message" || t.type === "customer");
-    if (last?.type === "message" && last.author?.kind === "user" && last.author.is_current_user && squish(last.body) === squish(htmlToText(body))) {
+    if (last?.type === "message" && last.author?.kind === "user" && last.author.is_current_user && dupKey(last.body) === dupKey(htmlToText(body))) {
       throw refuse(
         `the newest reply on this conversation (thread ${last.thread_id}) is already yours with the same text, so this looks ` +
           "like a duplicate. Do not send it again unless the human confirms they want the customer to get it twice",
@@ -2411,6 +2419,10 @@ async function sendReplyUnlocked(port: FreeScoutPort, conversationId: number, op
       `the conversation's customer email is now ${after.customer?.email ?? "not shown"}, not ${customerEmail} (it changed during the ` +
         "call), so the reply may have gone to another address",
     );
+  }
+  // FreeScout's send job reads the conversation's mailbox when it runs, so a move during the call changes the sender.
+  if (after.mailbox_id !== cur.mailbox_id || !replyMailboxAllowed(gate, after.mailbox_id)) {
+    throw danger(`the conversation is now in mailbox ${after.mailbox_id}, not ${cur.mailbox_id} (moved during the call)`);
   }
   const changed: string[] = [];
   if (after.status_value !== status) changed.push(`status is ${after.status_value}, expected ${status}`);

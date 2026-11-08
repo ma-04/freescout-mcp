@@ -348,8 +348,9 @@ Source: FreeScout 1.8.248 in the demo container (`/www/html`, read 2026-11-07, n
 `app/Http/Controllers/ConversationsController.php` `ajax()` case `send_reply` (line 707), `load_draft` (1762),
 `save_draft` (1428), `undoReply()` (3407), `getUndoTimeout()` (3636); `app/Listeners/SendReplyToCustomer.php`;
 `app/Conversation.php` `changeStatus()` (2083); `app/Thread.php` `getActionPerson()` (640), `getToFirst()` (437);
-`resources/views/conversations/partials/thread.blade.php`, `view.blade.php`, `customer_sidebar.blade.php`. Not yet
-exercised live by this MCP (the user runs the live test).
+`resources/views/conversations/partials/thread.blade.php`, `view.blade.php`, `customer_sidebar.blade.php`. Exercised
+live on the demo (2026-11-07/08, restricted agent, outbound SMTP dead-ended): a new reply and a sent own draft each
+became one published `type=2` thread with one `send_logs` row, to the customer only.
 
 **New reply** (no `thread_id`). Required: `mailbox_id` (`Mailbox::findOrFail` + `can('view')`), `conversation_id`
 (`can('view')`), `body` (`'body' => 'required|string'`, line ~818; `cc`/`bcc` `nullable|array`). Server behaviour:
@@ -433,9 +434,12 @@ session's single retry cannot send twice. A new status line means a teammate cha
 the status and assignee read beforehand, which FreeScout applies, so their change was probably reverted
 (concurrent-change warning).
 
-Known limits. (1) English FreeScout UI only: the author "you" (`__('you')`) and the conversation-type class
-(`conv-type-{{ strtolower(__('Email')) }}`, view.blade.php line 39) are translated in other locales, so every reply is
-refused there (fails closed; no detection rework is attempted).
+Known limits. (1) English FreeScout UI: the author "you" (`__('you')`) and the conversation-type class
+(`conv-type-{{ strtolower(__('Email')) }}`, view.blade.php line 39) are translated in other locales. Drafts are then
+always refused; new replies are refused unless the locale also translates "Email" as "Email" (da, fr, it, ro, sk do).
+Fails closed; the after-state checks use classes, hrefs and attributes, not English text. A teammate whose display
+name is literally "You" is indistinguishable from `__('you')` on a draft (plain text, no profile link), so their
+draft would pass the own-draft check; it still goes only to the customer.
 (2) `sent_to` is the first `.contact-main` the sidebar shows. `profile_snippet.blade.php` lists the customer's Email
 records with `conversation.customer_email` first only when it is one of them; if `customer_email` has no matching
 Email record of the customer, the page shows another address while FreeScout sends to `customer_email`. The reply

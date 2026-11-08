@@ -128,6 +128,8 @@ export class FakeFreeScout {
     rereadFailsAfterReply?: boolean;
     /** A reply also changes the conversation's customer email to this (a teammate changed the customer mid-call). */
     replyChangesCustomer?: string;
+    /** send_reply moves the conversation to this mailbox (a teammate moving it mid-call). */
+    replyMovesMailbox?: number;
     /** delete_thread also deletes this other thread id (from whichever simulated conversation has it). */
     deleteAlsoRemoves?: number;
   } = {};
@@ -400,6 +402,7 @@ export class FakeFreeScout {
     if (m.replyReassigns !== undefined) conv.assignee_id = m.replyReassigns;
     if (m.replyChangesStatus !== undefined) conv.status = m.replyChangesStatus;
     if (m.replyChangesCustomer !== undefined) conv.customer_email = m.replyChangesCustomer;
+    if (m.replyMovesMailbox !== undefined) conv.mailbox_id = m.replyMovesMailbox;
     const by = m.replyAuthor ?? this.postUserId;
     const shown = { to: [m.replyShowsTo ?? to], cc: m.replyShowsCc ?? cc };
     let thread: FakeThread;

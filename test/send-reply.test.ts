@@ -79,7 +79,10 @@ describe("FREESCOUT_REPLY_ENABLED / FREESCOUT_REPLY_MAILBOXES", () => {
 
   it("mailboxes: comma/space separated positive integers, de-duplicated; anything else throws", () => {
     expect(parseReplyGate({ FREESCOUT_REPLY_ENABLED: "1", FREESCOUT_REPLY_MAILBOXES: " 3, 1 3\t2,," }).mailboxes).toEqual([3, 1, 2]);
-    expect(parseReplyGate({ FREESCOUT_REPLY_ENABLED: "1", FREESCOUT_REPLY_MAILBOXES: " , " }).mailboxes).toEqual([]);
+    for (const v of [",", " , ", ";"]) {
+      expect(() => parseReplyGate({ FREESCOUT_REPLY_ENABLED: "1", FREESCOUT_REPLY_MAILBOXES: v }), JSON.stringify(v)).toThrow(/FREESCOUT_REPLY_MAILBOXES/);
+    }
+    for (const v of ["", "  "]) expect(parseReplyGate({ FREESCOUT_REPLY_ENABLED: "1", FREESCOUT_REPLY_MAILBOXES: v })).toEqual({ enabled: true, mailboxes: [] });
     for (const v of ["*", "all", "0", "-1", "1.5", "01", "1;2", "support", "1e3", "0x1", "99999999999999999999"]) {
       expect(() => parseReplyGate({ FREESCOUT_REPLY_ENABLED: "1", FREESCOUT_REPLY_MAILBOXES: v }), v).toThrow(/FREESCOUT_REPLY_MAILBOXES: invalid entry/);
     }
@@ -598,6 +601,20 @@ describe("sendReply: duplicate sends, edited drafts, mailbox and customer checks
     expect(posts()).toEqual([]);
     fs.addConv(7, { list_mailbox_id: null });
     await reply(7, { body: "x" });
+    expect(fs.replies).toHaveLength(1);
+  });
+
+  it("conversation moved to another mailbox during the call -> DANGER (even with no mailbox list)", async () => {
+    fs.addConv(9, { list_mailbox_id: null });
+    fs.misbehave.replyMovesMailbox = 2;
+    await expect(reply(9, { body: "x" })).rejects.toThrow(/^DANGER: .*now in mailbox 2, not 1 \(moved during the call\).*do NOT retry/);
+    expect(fs.replies).toHaveLength(1);
+  });
+
+  it("duplicate check sees through FreeScout's linkified www. URLs (page text gains ' (http://…)')", async () => {
+    fs.addConv(9, { threads: [{ id: 41, type: "message", body: '<p>See <a href="http://example.com/help">www.example.com/help</a> for steps.</p>', to: [CUSTOMER] }] });
+    await expect(reply(9, { body: "See www.example.com/help for steps." })).rejects.toThrow(/looks like a duplicate.*Nothing was sent/);
+    await reply(9, { body: "See www.example.com/other for steps." });
     expect(fs.replies).toHaveLength(1);
   });
 
