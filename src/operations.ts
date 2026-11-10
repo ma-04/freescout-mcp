@@ -2828,6 +2828,14 @@ async function createConversationUnlocked(
 
   if (!send) return createDraft(port, { mailboxId, to, cc, bcc, subject, body, status }, plan.status !== undefined);
 
+  // The after-send checks read translated markup (conv-type-{{ __('Email') }}, "To:"/"Cc:"/"Bcc:" labels). On another
+  // language they would fail only AFTER the email is out, so send mode needs an English UI up front (fails closed).
+  if (f.anyone_label !== "Anyone") {
+    throw refuse(
+      `send mode needs an English FreeScout UI (the New Conversation form's "Anyone" option reads ${JSON.stringify(f.anyone_label)}), ` +
+        "because the checks after sending read FreeScout's English labels. Create a draft (send=false) instead",
+    );
+  }
   // Assignee: one FreeScout offers on this mailbox's form (-1 Anyone, the logged-in user, usersAssignable()). FreeScout
   // silently leaves the conversation unassigned for anyone else, so the list is checked here and the result re-read.
   if (!f.user_options.length) throw refuse("the New Conversation page offers no assignee list (unexpected FreeScout markup)");

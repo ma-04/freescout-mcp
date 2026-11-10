@@ -35,7 +35,7 @@ export function registerCreateConversation(server: McpServer, { client, reply, c
         "line = new paragraph) or simple HTML. status (active, pending or closed) is optional; omitted = what FreeScout's " +
         "New Conversation form preselects for the mailbox. assignee (\"me\", \"unassigned\" or a user id FreeScout offers " +
         "in that mailbox) and tags work only with send=true: FreeScout keeps no assignee on a draft and tags cannot be " +
-        "added to a draft, so they are refused in draft mode. The created conversation is re-read and checked " +
+        "added to a draft, so they are refused in draft mode. Sending needs an English FreeScout UI. The created conversation is re-read and checked " +
         "afterwards. If an error starts with \"POSSIBLY SENT:\" the email may already be out: NEVER retry (FreeScout has " +
         "no duplicate check, the recipients would get it twice); tell the human to check. \"POSSIBLY CREATED:\" means a " +
         "draft may exist: do not retry blindly. A result with tags_error means the conversation WAS created and sent but " +

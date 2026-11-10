@@ -327,6 +327,8 @@ export interface CreateFormPage {
   /** select[name=user_id] option values (-1 = Anyone) and the preselected one. */
   user_options: number[];
   user_selected: number | null;
+  /** Label of the `-1` assignee option: `__('Anyone')`, i.e. "Anyone" on an English UI. */
+  anyone_label: string | null;
   current_user_id: number | null;
 }
 
@@ -365,6 +367,10 @@ export function parseCreateForm($: CheerioAPI): CreateFormPage {
     stored_status: intOrNull(toolbar.find('select[name="status"]').first().attr("data-note-status")),
     user_options: ints(options("user_id")),
     user_selected: pick(options("user_id")),
+    anyone_label: (() => {
+      const o = options("user_id").find((x) => intOrNull($(x).attr("value")) === -1);
+      return o ? squish($(o).text()) : null;
+    })(),
     current_user_id: intOrNull($("body").attr("data-auth_user_id")),
   };
 }

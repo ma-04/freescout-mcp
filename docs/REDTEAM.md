@@ -534,3 +534,10 @@ draft conversation was not verified (module not on the demo). Tests: `test/creat
 create_conversation drafts cannot be sent while the gate is off" in `send-boundary.redteam.test.ts` (fails when
 `refuseDraftConversation` is neutralised; the fake records any `send_reply` reaching a draft conversation as an email),
 `test/http.test.ts`; live tests behind `FREESCOUT_CREATE_LIVE_TEST=1` / `FREESCOUT_CREATE_SEND_LIVE_TEST=1`, not yet run.
+Source-scan counts after this change (the numbers in the send_reply section above are as of 2026-11-07):
+`action: "send_reply",` 4 (note, forward, reply, create-send builders), `port.ajaxPost(` call sites 14 (10 to `AJAX`:
++ create draft and create send), `is_create: "1",` 2, `action: "save_draft",` 2 (reply draft, create draft).
+Send mode also refuses a non-English FreeScout UI before posting (the after-send checks read English labels; the
+New Conversation form's `__('Anyone')` option must read "Anyone"); draft mode works in any language.
+The create-form parser was checked against the captured draft-conversation page
+`docs/fixtures/conversation-13-new-draft.html`; the New Conversation page itself was not captured (built from source).

@@ -714,6 +714,11 @@ with the returned `conversation_id`/`thread_id`, the mailbox, To/Cc/Bcc, subject
 (otherwise `DANGER`), status/assignee differences as a warning. Ambiguous failures after the POST: `POSSIBLY SENT:`
 (send) / `POSSIBLY CREATED:` (draft). Tags (send mode) go through `add_tag` afterwards; the Tags module is probed with a
 read-only autocomplete before sending, and a tag failure after sending is returned in the result.
+Known limits: send mode needs an English UI (the `-1` assignee option must read "Anyone"; the after-send checks read
+`conv-type-email` and the `To:`/`Cc:`/`Bcc:` labels, which FreeScout translates), refused before the POST otherwise;
+draft mode reads only form names/values and works in any language. `parseCreateForm` was checked against the captured
+draft-conversation page `docs/fixtures/conversation-13-new-draft.html` (stored status 1, Send form preselecting 2);
+`GET /mailbox/{id}/new-ticket` was not captured (from source). Not exercised live.
 
 ---
 

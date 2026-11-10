@@ -9,6 +9,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as cheerio from "cheerio";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FreeScoutClient, type FreeScoutPort, type HtmlPage } from "../src/client.js";
 import { loadBaseConfig } from "../src/config.js";
@@ -28,7 +30,7 @@ import {
   type CreateConversationInput,
   type CreateGate,
 } from "../src/operations.js";
-import { parseCreateForm } from "../src/parsers/conversation.js";
+import { parseConversation, parseCreateForm } from "../src/parsers/conversation.js";
 import { createSendAllowed, describeCreate, parseCreateSend, REPLY_DISABLED, type ReplyGate } from "../src/reply-gate.js";
 import { Session } from "../src/session.js";
 import { registerTools } from "../src/tools/index.js";
@@ -284,6 +286,25 @@ describe("draft mode (default, ungated)", () => {
     expect(r.warning).toMatch(/FreeScout stored status 1 on the draft, not 2 as requested/);
   });
 
+  it("FreeScout error envelope: plain error (not POSSIBLY CREATED), nothing created", async () => {
+    fs.misbehave.draftAnswer = { status: "error", msg: "Message has been already sent. Please discard this draft." };
+    const e = await create({}, OFF).catch((x) => x);
+    expect(e.message).toMatch(/^create_conversation \(draft\) failed: Message has been already sent/);
+    expect(fs.createdDrafts).toEqual([]);
+  });
+
+  it("connection dropped after the draft POST: POSSIBLY CREATED", async () => {
+    fs.misbehave.createDropsConnection = true;
+    await expect(create({}, OFF)).rejects.toThrow(/^POSSIBLY CREATED: .*Drafts folder/);
+    expect(fs.createdDrafts).toHaveLength(1);
+    expect(fs.emails).toEqual([]);
+  });
+
+  it("a non-English UI does not block drafts", async () => {
+    fs.newTicket = { anyone: "Jeder" };
+    await expect(create({}, OFF)).resolves.toMatchObject({ mode: "draft" });
+  });
+
   it("re-read fails: error with the id (nothing emailed)", async () => {
     fs.misbehave.rereadFailsAfterCreate = true;
     await expect(create({}, OFF)).rejects.toThrow(/created draft conversation 300 \(draft thread \d+, nothing was emailed\) but it could not be re-read/);
@@ -396,6 +417,24 @@ describe("send mode (FREESCOUT_REPLY_ENABLED + FREESCOUT_CREATE_SEND)", () => {
     expect(fs.convPosts).toEqual([]);
   });
 
+  it("non-English FreeScout UI: send refused before the POST (the after-send checks read English labels)", async () => {
+    fs.newTicket = { anyone: "Jeder" };
+    await expect(create({ send: true })).rejects.toThrow(/send mode needs an English FreeScout UI .*"Jeder".*Nothing was created or sent/);
+    expect(posts()).toEqual([]);
+  });
+
+  it("tags after sending: added through add_tag's pinned form and confirmed on the re-read", async () => {
+    fs.tags = ["vip"];
+    fs.tagNewConversations = true;
+    const r = await create({ send: true, tags: ["vip", "VIP", "renewal"] });
+    expect(r.tags).toMatchObject({ conversation_id: 300, tags_before: [], added: ["vip", "renewal"], tags_after: ["vip", "renewal"] });
+    expect(r.tags_error).toBeUndefined();
+    expect(r.warning).toBeUndefined();
+    expect(fs.tagPosts.map((p) => p.filter(([k]) => k !== "_token"))).toEqual([
+      [["action", "add"], ["tag_names[]", "vip"], ["tag_names[]", "renewal"], ["conversation_id", "300"]],
+    ]);
+  });
+
   it("tag failure after sending: the result reports the created id, sent=true and the failure (not an error)", async () => {
     fs.tags = ["vip"]; // module present (autocomplete answers); the new conversation shows no tag controls -> add_tag fails
     const r = await create({ send: true, tags: ["vip"] });
@@ -423,6 +462,20 @@ describe("parseCreateForm", () => {
       status_options: [1, 2, 3], status_selected: 2, user_options: [-1, 7, 9], user_selected: 7, current_user_id: 7,
     });
     expect(parseCreateForm(cheerio.load("<html><body></body></html>")).present).toBe(false);
+  });
+
+  it("real captured draft-conversation page (docs/fixtures/conversation-13-new-draft.html, FreeScout 1.8.248)", () => {
+    const html = readFileSync(fileURLToPath(new URL("../docs/fixtures/conversation-13-new-draft.html", import.meta.url)), "utf8");
+    const $ = cheerio.load(html);
+    expect(parseCreateForm($)).toEqual({
+      present: true, conversation_id: 13, thread_id: 26, mailbox_id: 1, body_mailbox_id: 1, type: 1,
+      to: ["draft-test@customer.example"], cc: [], bcc: [], subject: "MCP draft-conversation test", body: "<p>unsent new conversation</p>",
+      // Stored status Active, but the Send form preselects the mailbox default (Pending): why draft mode warns.
+      status_options: [1, 2, 3], status_selected: 2, stored_status: 1,
+      user_options: [-1, 2, 1], user_selected: 2, anyone_label: "Anyone", current_user_id: 2,
+    });
+    const conv = parseConversation($, "https://freescout.example.com/conversation/13");
+    expect(conv).toMatchObject({ id: 13, mailbox_id: 1, is_draft_conversation: true, threads: [] });
   });
 });
 

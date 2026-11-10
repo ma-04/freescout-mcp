@@ -75,7 +75,9 @@ export class FakeFreeScout {
   /** Mailboxes whose New Conversation page this user may open (others: 403, like create()'s authorize). */
   newTicketMailboxes: number[] = [1];
   /** The New Conversation form's toolbar: assignable users (besides -1 and the logged-in user) and preselections. */
-  newTicket: { users?: Array<[number, string]>; statusSelected?: number | null; userSelected?: number | null } = {};
+  newTicket: { users?: Array<[number, string]>; statusSelected?: number | null; userSelected?: number | null; anyone?: string } = {};
+  /** Tags module on conversations created by send_reply + is_create: they get their own (empty) tag list and controls. */
+  tagNewConversations = false;
   /** Users FreeScout accepts as assignee (Mailbox::userHasAccess); others are silently ignored (left unassigned). */
   assignable: number[] = [7, 8];
   private nextConvId = 300;
@@ -103,6 +105,8 @@ export class FakeFreeScout {
     draftStoresStatus?: number;
     /** create (draft): answer success without ids. */
     draftNoIds?: boolean;
+    /** create (draft): envelope answered instead (status "error": nothing is created). */
+    draftAnswer?: unknown;
     /** One-shot: the next conversation page GET after a create answers HTTP 502. */
     rereadFailsAfterCreate?: boolean;
     statusAddsMessage?: boolean;
@@ -280,6 +284,14 @@ export class FakeFreeScout {
     this.tagPosts.push([...form.entries()]);
     // One conversation only: an array (bulk) or repeated conversation_id is refused.
     if (form.has("conversation_id[]") || form.getAll("conversation_id").length !== 1) return [400, { status: "error", msg: "bulk form" }];
+    const own = this.convs.get(Number(form.get("conversation_id")))?.tags;
+    if (own && form.get("conversation_id") !== "1") {
+      if (action === "add") {
+        for (const n of form.getAll("tag_names[]").map((x) => x.trim()).filter(Boolean)) if (!own.some((t) => t.toLowerCase() === n.toLowerCase())) own.push(n);
+        return [200, { status: "success", tags: own.map((name) => ({ name, url: tagUrl(this.base, name) })) }];
+      }
+      return [200, { status: "error", msg: "Unknown action" }];
+    }
     if (form.get("conversation_id") !== "1") return [200, { status: "error", msg: "Conversation not found" }];
     const norm = (n: string) => n.trim();
     const has = (n: string) => tags.some((t) => t.toLowerCase() === n.toLowerCase());
@@ -415,6 +427,8 @@ export class FakeFreeScout {
     const id = this.nextConvId++;
     const threadId = this.nextThreadId++;
     if (action === "save_draft") {
+      const da = m.draftAnswer as { status?: unknown } | undefined;
+      if (da && typeof da === "object" && da.status === "error") return [200, da];
       if (m.draftPublishes) {
         this.convs.set(id, { number: id, mailbox_id: mailbox, status: status || 1, assignee_id: -1, customer_email: to[0] ?? "", draft: false, subject, threads: [{ id: threadId, type: "message", body, to: to.slice(0, 1), cc, bcc }] });
         this.emails.push({ conversation_id: id, to, cc, bcc, body, via: "create" });
@@ -440,6 +454,7 @@ export class FakeFreeScout {
     if (m.createAddsTwo) threads.push({ id: this.nextThreadId++, type: "message", body, by: this.postUserId, ...shown });
     this.convs.set(id, {
       number: id, mailbox_id: m.createMovesMailbox ?? mailbox, status: status || 1, assignee_id: assignee, customer_email: to[0]!, draft: !!m.createStaysDraft, subject, threads,
+      ...(this.tagNewConversations ? { tags: [] } : {}),
     });
     if (!m.createStaysDraft) this.emails.push({ conversation_id: id, to: to.slice(0, 1), cc, bcc, body, via: "create" });
     if (m.createAnswer !== undefined) return [200, m.createAnswer];
@@ -782,6 +797,8 @@ export interface FakeConv {
   cc_preset?: string[];
   /** Subject (default "Fake subject {id}"). */
   subject?: string;
+  /** Tags module tags of this conversation (rendered with the module's controls); undefined = no controls. */
+  tags?: string[];
   threads: FakeThread[];
 }
 
@@ -834,6 +851,7 @@ export function simConversationPage(base: string, token: string, id: number, c: 
     return `<div class="thread thread-type-${t.type}" id="thread-${t.id}" data-thread_id="${t.id}"><div class="thread-message">${fwd}<div class="thread-header"><div class="thread-title"><div class="thread-person"><strong>${person}</strong>${draftMark}</div>${recips}</div><div class="thread-info"><a href="#thread-${t.id}" class="thread-date" title="Oct 26, 2026 10:00">now</a></div></div>${content}</div>${options}</div>`;
   };
   const layoutClass = c.draft ? "conv-new" : `conv-type-${c.type ?? "email"}`;
+  const tagMarkup = c.tags ? convTagsMarkup(base, c.tags) : { box: "", control: "" };
   const replyForm =
     (c.reply_to_options
       ? `<select name="to" id="to" class="form-control">${c.reply_to_options.map(([e, sel]) => `<option value="${esc(e)}"${sel ? ' selected="selected"' : ""}>Cust &lt;${esc(e)}&gt;</option>`).join("")}</select>`
@@ -846,7 +864,7 @@ export function simConversationPage(base: string, token: string, id: number, c: 
   return `<!DOCTYPE html><html><head><meta name="csrf-token" content="${token}"></head>
 <body data-auth_user_id="${userId}" data-conversation_id="${id}" data-mailbox_id="${c.mailbox_id}"><span class="nav-user">Agnes</span>
 ${c.list_mailbox_id === null ? "" : `<div id="conv-list-col" data-mailbox_id="${esc(String(c.list_mailbox_id ?? c.mailbox_id))}" data-conversation_id="${id}"></div>`}
-<div id="conv-layout" class="${layoutClass}"><div id="conv-toolbar">${menus}</div>
+<div id="conv-layout" class="${layoutClass}"><div id="conv-toolbar">${menus}<div class="conv-actions">${tagMarkup.control}</div></div>${tagMarkup.box}
 <div id="conv-subject"><div class="conv-numnav"># <strong>${c.number}</strong></div><div class="conv-subjtext"><span>${esc(c.subject ?? `Fake subject ${id}`)}</span></div></div>
 ${c.no_customer_panel ? "" : `<div id="conv-layout-customer"><div class="customer-snippet"><a href="${base}/customers/5/edit" class="customer-name">Cust Omer</a>
 <ul class="customer-contacts"><li class="customer-email"><a href="#" class="contact-main">${esc(c.customer_email)}</a></li></ul></div></div>`}
@@ -1098,12 +1116,12 @@ function createView(
   userId: number,
   v: {
     mailboxId: number; conversationId?: number; threadId?: number; to?: string[]; cc?: string[]; bcc?: string[]; subject?: string; body?: string;
-    storedStatus?: number | null; statusSelected?: number | null; userSelected?: number | null; users?: Array<[number, string]>;
+    storedStatus?: number | null; statusSelected?: number | null; userSelected?: number | null; users?: Array<[number, string]>; anyone?: string;
   },
 ): string {
   const opts = (list: string[]) => list.map((e) => `<option value="${esc(e)}" selected="selected">${esc(e)}</option>`).join("");
   const statusOpts = [1, 2, 3].map((s) => `<option value="${s}"${v.statusSelected === s ? ' selected="selected"' : ""}>${STATUS_NAMES[s]}</option>`).join("");
-  const users: Array<[number, string]> = [[-1, "Anyone"], [userId, "Me"], ...(v.users ?? [[8, "Other Agent"]])];
+  const users: Array<[number, string]> = [[-1, v.anyone ?? "Anyone"], [userId, "Me"], ...(v.users ?? [[8, "Other Agent"]])];
   const userOpts = users.map(([u, n]) => `<option value="${u}"${v.userSelected === u ? ' data-default="true" selected="selected"' : ""}>${esc(n)}</option>`).join("");
   return `<!DOCTYPE html><html><head><meta name="csrf-token" content="${token}"></head>
 <body class="body-conv" data-auth_user_id="${userId}"${v.conversationId ? ` data-conversation_id="${v.conversationId}"` : ""} data-mailbox_id="${v.mailboxId}"><span class="nav-user">Agnes</span>
@@ -1138,9 +1156,9 @@ export function newTicketPage(
   token: string,
   mailboxId: number,
   userId: number,
-  o: { users?: Array<[number, string]>; statusSelected?: number | null; userSelected?: number | null } = {},
+  o: { users?: Array<[number, string]>; statusSelected?: number | null; userSelected?: number | null; anyone?: string } = {},
 ): string {
-  return createView(base, token, userId, { mailboxId, statusSelected: o.statusSelected ?? null, userSelected: o.userSelected ?? null, users: o.users });
+  return createView(base, token, userId, { mailboxId, statusSelected: o.statusSelected ?? null, userSelected: o.userSelected ?? null, users: o.users, anyone: o.anyone });
 }
 
 /** GET /conversation/{id} of a draft conversation (state 1): the create view pre-filled from the draft. */
