@@ -10,6 +10,13 @@ see "remove_note" at the end).
 > exists. With it set, `send_reply` emails the conversation's customer through a pinned, re-verified path; see
 > "send_reply (2026-11-07)" at the end. Not yet exercised live by a red-team pass.
 
+> **Scope change 2026-11-10 (user decision):** `create_conversation` is always available. By default it creates a
+> **draft** conversation (nothing is emailed), so the old invariant "the agent cannot create a draft conversation" no
+> longer holds. It **sends** a new conversation (to any address) only when the operator sets both
+> `FREESCOUT_REPLY_ENABLED=1` and `FREESCOUT_CREATE_SEND=1`. The replacement invariant: with `FREESCOUT_CREATE_SEND`
+> off, no path can get a draft conversation this MCP created emailed. See "create_conversation (2026-11-10)" at the end.
+> Not yet exercised live by a red-team pass.
+
 Method: attacks driven through the real MCP operations against the live demo
 (`https://freescout.example.com`) as the **restricted agent** (`agent@…`, Support mailbox only),
 with before/after inspection of the `conversations`, `threads`, `send_logs` and `jobs` tables over
@@ -56,7 +63,7 @@ Send / state-change vectors:
 - **Malformed conversation_id** (string/float/negative/array/object/`__proto__`) — rejected by `z.number().int().positive()` before any operation runs.
 - **add_note changing status/assignee** — `add_note` re-reads the page and sends the current `status`/`user_id` verbatim. Confirmed live on conv 6 (assigned admin, active), conv 3 (pending, assigned agent), conv 7 (pending, unassigned): `conversations.status` and `user_id` unchanged after the note in every case.
 - **save_draft publishing / sending** — `save_draft` never sends; `buildDraftForm` never emits `is_note`/`subtype`/`is_create`.
-- **discard_draft deleting a whole conversation** — refused unless the conversation has published threads; the agent cannot create a draft-conversation (no `is_create` path).
+- **discard_draft deleting a whole conversation** — refused unless the conversation has published threads, and refused outright on an unsent draft conversation. (2026-10-22: "the agent cannot create a draft-conversation (no `is_create` path)". Since 2026-11-10 `create_conversation` can; see the end of this file: every tool still refuses such a conversation, so the MCP cannot send or delete the drafts it creates.)
 
 Permission boundary (restricted agent, Billing = mailbox 2, convs 10–12):
 - `get_conversation(10/11)` → `PermissionError` (403). `list_conversations(mailbox 2, …)` → 403.
@@ -138,7 +145,8 @@ Attack surface:
   `assertNoteForm` still rejects `subtype`, so the note path cannot become a forward. Every `send_reply` on the wire
   is either the note shape or the forward shape (wire-level test through the MCP tools).
 - **Side channels in the form.** `cc[]`/`bcc[]` would be copied onto the forwarded conversation, `thread_id` publishes
-  a draft, `is_create`/`multiple_conversations` create new conversations: all rejected as unexpected fields.
+  a draft, `is_create`/`multiple_conversations` create new conversations: all rejected as unexpected fields. (The only
+  forms carrying `is_create` are `create_conversation`'s own, see the end of this file; `assertForwardForm` is unchanged.)
   Bodies travel as one URL-encoded field (smuggling test with `&subtype=&to_email[]=…&cc[]=…` in the body).
 - **State drift.** `status` and `user_id` are the conversation's current values; the post-read requires both
   unchanged and exactly one new note; any new `message`/`draft` thread → `DANGER` (FreeScout's 15 s undo window is
@@ -460,3 +468,69 @@ sites go from 10 to 12 (eight to `AJAX`: `load_draft` and the reply); `registerS
 `subtype` or recipient key. A tool-level test drives a customer message asking to reply to an attacker with a CC and
 mark spam: the spam status is rejected by the schema, smuggled `to`/`cc` arguments are dropped, and the one POST carries
 exactly the pinned keys with the current status/assignee; FreeScout (fake) records the customer as the only recipient.
+
+## create_conversation (2026-11-10)
+
+Scope change (PLAN.md "Scope update (2026-11-10)"): a new outbound email conversation. FreeScout facts are in
+docs/freescout-endpoints.md §5.7 (read from the 1.8.248 source): `send_reply` + `is_create` without `conversation_id`
+creates **and emails** a conversation in one request (Customer record for `to`, 15 s undo only from the sending
+session); `save_draft` + `is_create` without `conversation_id` creates a **draft** conversation (state 1, no Customer
+record, no assignee, nothing emailed); a draft conversation renders as the create form, and the UI sends it with
+`send_reply` + `is_create` + `conversation_id` + `thread_id`.
+
+Broken invariant and its replacement. Line "discard_draft deleting a whole conversation" above relied on "the agent
+cannot create a draft conversation". Draft mode is ungated, so it can. The property that matters is that such a draft
+is never **sent** by the MCP unless the operator enabled sending. Audit of every tool that takes a conversation or
+thread id against an MCP-created draft conversation (page = create view, `is_draft_conversation`):
+
+| Tool | What stops it | Result |
+|---|---|---|
+| `send_reply` (body or `draft_thread_id`, any status) | `refuseDraftConversation` (and the page has no `conv-type-email`) | refused, no POST |
+| `send_reply` on another conversation with the draft's thread id | thread not on that page (`Incorrect thread` server-side too) | refused, no POST |
+| `save_draft` (new, or with the draft thread id; on the draft or on another conversation) | `refuseDraftConversation` / `requireDraftThread` | refused, no POST |
+| `discard_draft` (on the draft or another conversation) | `refuseDraftConversation` / `requireDraftThread` | refused, no POST |
+| `add_note`, `close_conversation`, `remove_note` | `refuseDraftConversation` | refused, no POST |
+| `forward_conversation` | `refuseDraftConversation` | refused, no POST |
+| `add_tag` / `remove_tag` | `loadTaggable` → `refuseDraftConversation` | refused, no POST |
+| `create_conversation` `send=true` | gate check before any request | refused, no request |
+| `get_conversation` | read-only | returns `is_draft_conversation: true` |
+
+None of the MCP's forms can publish a draft conversation: only the UI's combination `is_create` + `conversation_id` /
+`thread_id` does that, and `assertCreateForm` refuses both id keys by name; `assertReplyForm`, `assertNoteForm`,
+`assertForwardForm` and `buildDraftForm` refuse `is_create` exactly as before.
+
+Guards:
+- **Gate.** Send mode needs `FREESCOUT_REPLY_ENABLED=1` and `FREESCOUT_CREATE_SEND=1` (exactly `1`/`true`; other values
+  stop the server; `CREATE_SEND` alone = off + warning); `FREESCOUT_REPLY_MAILBOXES` limits it. Parsed once from the
+  environment, passed as a separate boolean through config, the stdio entry, `HttpServerOptions` and `ToolContext`;
+  the HTTP server reads no header for it (test sends `X-FreeScout-Create-Send`). `send=true` with the gate off is
+  refused before any request and never downgraded to a draft. The send path re-checks the gate right before its POST.
+- **Pinned forms.** `assertCreateForm(form, mode)` runs right before each POST: exact keys (`action, mailbox_id,
+  is_create=1, type=1, to[], subject, body, status` + optional `cc[]`/`bcc[]`; send adds `user_id` and `after_send=1`),
+  exactly one strict `to`, strict `cc`/`bcc` (max 10 together, no address twice anywhere), subject without control
+  characters (no header injection), status 1/2/3. Refused by name: `conversation_id`, `thread_id`, `is_note`,
+  `subtype`, `multiple_conversations` (one conversation and email per address), `to_email`, `from_alias`, attachments,
+  `conv_history`, `customer_id`, phone fields. Draft mode refuses `user_id`/`after_send`.
+- **Recipients.** Any address, by design; each must be one bare lowercase address (`isStrictRecipient`), so FreeScout's
+  `Name email` parsing (which creates named Customer records) and list splitting cannot be reached.
+- **Mailbox.** Caller-supplied, so it must be on the dashboard list and its New Conversation page must open (FreeScout's
+  own `authorize('view')`), the page's mailbox ids must match, and the re-read must show the same mailbox.
+- **Assignee/status/tags.** Assignee must be one the mailbox's form offers (FreeScout silently ignores others); refused in
+  draft mode, as are tags (no assignee is stored on a draft; tags cannot go on one). Status is stored on a draft but the
+  UI's Send form preselects the mailbox default, which the result says.
+- **After-state.** Draft: still an unsent draft (else `DANGER`), the form shows the same ids, mailbox, To/Cc/Bcc, subject
+  and text (else an error naming the created id: "do NOT create it again"). Send: published, the mailbox, exactly one
+  agent thread, a `message` by the logged-in user with To/Cc/Bcc exactly as requested, customer email = `to`, subject
+  (else `DANGER`); status/assignee differences are a warning. Ambiguous failures after dispatch are `POSSIBLY SENT:`
+  (send) or `POSSIBLY CREATED:` (draft). A tag failure after sending is returned in the result (`tags_error`, the id,
+  `sent: true`), never as a retryable-looking error; a missing Tags module is detected before sending.
+- **Duplicates.** FreeScout has none; an in-process lock refuses a second identical call (mailbox + to + subject) while
+  the first is in flight.
+
+Residual risks (by design): ungated draft mode is a persistent write the MCP cannot undo (drafts stay until a human
+discards them; no Customer record is created for a draft); in send mode the recipient can be anyone and the email cannot
+be recalled after ~15 s; FreeScout's mailbox Auto BCC setting adds recipients the MCP does not post; the Tags module on a
+draft conversation was not verified (module not on the demo). Tests: `test/create-conversation.test.ts`, "RT:
+create_conversation drafts cannot be sent while the gate is off" in `send-boundary.redteam.test.ts` (fails when
+`refuseDraftConversation` is neutralised; the fake records any `send_reply` reaching a draft conversation as an email),
+`test/http.test.ts`; live tests behind `FREESCOUT_CREATE_LIVE_TEST=1` / `FREESCOUT_CREATE_SEND_LIVE_TEST=1`, not yet run.

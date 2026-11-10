@@ -8,7 +8,7 @@ Layout on the server:
 
 ```
 ~/freescout-mcp/
-  .env                 chmod 600: MCP_TOKEN, FREESCOUT_URL, BIND_IP, MCP_PORT, optional FREESCOUT_FORWARD_ALLOW, FREESCOUT_REPLY_ENABLED/_MAILBOXES (see .env.example)
+  .env                 chmod 600: MCP_TOKEN, FREESCOUT_URL, BIND_IP, MCP_PORT, optional FREESCOUT_FORWARD_ALLOW, FREESCOUT_REPLY_ENABLED/_MAILBOXES, FREESCOUT_CREATE_SEND (see .env.example)
   docker-compose.yml   copy of deploy/docker-compose.yml
   src-tree/            rsync'd working tree (no .git, node_modules, dist, .env*); the image is built from it
 ```
@@ -148,3 +148,6 @@ redacted tool errors, never cookies, passwords or the bearer token. Set `FREESCO
 - `FREESCOUT_REPLY_ENABLED=1` in `.env` (optional) registers `send_reply` for every session, which emails the
   conversation's customer; `FREESCOUT_REPLY_MAILBOXES` limits it to some mailbox ids. Unset, the tool does not exist.
   Clients cannot change either; the container log says at startup whether replies are enabled and for which mailboxes.
+- `create_conversation` is always registered and by default only creates draft conversations (nothing is emailed).
+  `FREESCOUT_CREATE_SEND=1` together with `FREESCOUT_REPLY_ENABLED=1` lets every session **send** new conversations to
+  any address (limited by `FREESCOUT_REPLY_MAILBOXES`). Clients cannot change it; the startup log says which mode is on.

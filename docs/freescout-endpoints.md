@@ -695,6 +695,26 @@ the mailbox's "ticket assignee" setting. A human sends it from that page (`send_
 **Tags.** The Tags module is not on the demo and the create view has no tag controls, so whether `tags/ajax add` works
 on a draft conversation is **not verified**. The MCP's `add_tag` refuses draft conversations anyway (§9).
 
+**What the MCP sends** (tool `create_conversation`; `assertCreateForm` right before the POST):
+
+| Mode | Fields |
+|---|---|
+| draft (default, ungated) | `action=save_draft`, `mailbox_id`, `is_create=1`, `type=1`, `to[]` (exactly one), `cc[]`/`bcc[]` (only when given), `subject`, `body`, `status` |
+| send (`FREESCOUT_REPLY_ENABLED=1` + `FREESCOUT_CREATE_SEND=1`) | the same with `action=send_reply`, plus `user_id` (`-1` or an offered user) and `after_send=1` |
+
+Never: `conversation_id`, `thread_id` (edit/publish an existing draft), `multiple_conversations`, `is_note`, `subtype`,
+`to_email`, `from_alias`, attachments, `conv_history`, `customer_id`, phone fields. Every address is one bare lowercase
+address (`isStrictRecipient`), at most 10 in cc+bcc, no address twice. Before the POST: the mailbox is on the dashboard,
+`GET /mailbox/{id}/new-ticket` opens with that mailbox in `form#form-create` and `body[data-mailbox_id]`, the assignee is
+one of its `select[name=user_id]` options; omitted status/assignee = the form's preselected option (status: first option
+when none). Draft mode refuses `assignee` and `tags`. After the POST: draft = the re-read page is still the create view
+with the returned `conversation_id`/`thread_id`, the mailbox, To/Cc/Bcc, subject and text as posted (a published page is
+`DANGER`); send = the id from `redirect_url`, the re-read page published in the mailbox, exactly one agent thread, a
+`message` by the logged-in user, To/Cc/Bcc (thread header) and the customer email exactly as requested, the subject
+(otherwise `DANGER`), status/assignee differences as a warning. Ambiguous failures after the POST: `POSSIBLY SENT:`
+(send) / `POSSIBLY CREATED:` (draft). Tags (send mode) go through `add_tag` afterwards; the Tags module is probed with a
+read-only autocomplete before sending, and a tag failure after sending is returned in the result.
+
 ---
 
 ## 6. Permission model for a limited user (observed as agent, Support only)

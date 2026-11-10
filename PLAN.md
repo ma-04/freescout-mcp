@@ -199,6 +199,9 @@ Payloads come from that file, not from memory.
 
 ## Out of scope (v1)
 Replying to customers, changing assignee, reopening or marking spam, attachments upload.
+(Customer replies: in scope since 2026-11-07, gated, `send_reply`. New outbound conversations: in scope since 2026-11-10,
+`create_conversation`, drafts ungated and sending gated; its `assignee`/`status` apply only to the new conversation,
+there is still no tool that reassigns an existing conversation.)
 (Statistics: Phase A search-derived tools and Phase B Reports-module tools in scope since 2026-10-28, merged as PR #9 and #10; Phase B live-verified against production the same day, docs/freescout-endpoints.md §11.4a.)
 (Closing and forwarding: in scope since 2026-10-26, see above.) (Adding tags: in scope since
 2026-10-25, implemented as `add_tag`; see above.)
@@ -244,3 +247,11 @@ Wire facts to verify from the FreeScout source (demo container) before coding: o
 vs `save_draft`+`is_create` then send; exact shape of `to`/`cc`/`bcc`/`type`/`user_id`/`status`; whether draft mode
 persists `user_id`/`status`; whether tags work on a `state=1` conversation; whether a draft creates a Customer; the
 response (new id or redirect); undo-send delay. Recorded in docs/freescout-endpoints.md (§5.2 / new §5.7, §5.3a).
+
+Implemented 2026-11-10 on branch `create-conversation` (not merged, not live-tested). Wire facts: docs/freescout-endpoints.md
+§5.7. Send mode is one `send_reply` + `is_create` POST without `conversation_id` (no orphan draft on failure) with
+`after_send=1`, so FreeScout's `redirect_url` carries the new id. Draft mode is one `save_draft` + `is_create` POST.
+Draft mode refuses `assignee` (save_draft never stores one) and `tags` (add_tag refuses draft conversations; the Tags
+module on drafts is unverified); `status` is stored on the draft and checked on re-read, with a warning that FreeScout's
+Send form preselects the mailbox default. A draft creates no Customer record. Live tests are behind
+`FREESCOUT_CREATE_LIVE_TEST=1` / `FREESCOUT_CREATE_SEND_LIVE_TEST=1`.
