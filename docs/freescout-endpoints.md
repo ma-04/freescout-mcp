@@ -328,7 +328,8 @@ Creates/updates a **reply draft** (`TYPE_MESSAGE`, `STATE_DRAFT`), rendered on t
 
 Do **not** send `is_create` (that path creates a brand-new draft conversation, and rejects existing published ones with
 "Message has been already sent…"), `subtype`, or `is_note` (only honoured with `is_create`; drafts on existing
-conversations are always replies).
+conversations are always replies). `save_draft` itself (`buildDraftForm`) never carries `is_create`; the one form that
+does is `create_conversation`'s pinned draft form, §5.7.
 
 Response (observed): `{"status":"success","msg":"","conversation_id":2,"customer_id":4,"thread_id":28,"number":2}`.
 Errors (HTTP 200, `status:"error"`): `Not enough permissions`, `Incorrect thread` (thread not in that conversation),
@@ -448,7 +449,13 @@ detectable from the page. A conversation without a customer has no sidebar and i
 
 ### 5.3a NEVER send (reference only)
 - `action=send_reply` without `is_note` from anything but the pinned reply form above (only when the operator enabled
-  it), including `is_create=1` / no `conversation_id` (new outbound conversation) and any `to`/`cc`/`bcc`.
+  it) or `create_conversation`'s pinned send form (§5.7, only when the operator set both `FREESCOUT_REPLY_ENABLED` and
+  `FREESCOUT_CREATE_SEND`). That includes `is_create=1` / no `conversation_id` (new outbound conversation) and any
+  `to`/`cc`/`bcc` from any other form.
+- `action=save_draft` with `is_create` from anything but `create_conversation`'s pinned draft form (§5.7: no
+  `conversation_id`, no `thread_id`, so it can only create a new draft conversation, never edit one).
+- `send_reply` or `save_draft` with `is_create` plus a `conversation_id` / `thread_id` (edits or publishes an existing
+  draft conversation: this is how the UI sends a draft conversation). No MCP form carries that combination.
 - `action=send_reply` with `subtype=1` from anything but the pinned forward form of §5.5 (allow-listed recipient,
   `is_note=1`, exactly one `to_email[]`, no `to`/`cc`/`bcc`/`thread_id`). The note form (§5.1) never carries `subtype`.
 - `action=conversation_change_status` with any status other than `3` (closed), see §5.4: no reopen, pending, spam or
@@ -591,6 +598,102 @@ not the first thread, and offered for deletion by FreeScout itself (`.thread-del
 `.thread-options`, parsed as `can_delete`). Then `assertDeleteThreadForm` pins exactly `{action:"delete_thread",
 thread_id:"<positive int>"}` and the one POST goes out. Afterwards the page is re-read: the thread must be gone (else
 error) and every other thread id from before must still be there (else `DANGER`).
+
+### 5.7 New outbound conversation: `is_create` (`create_conversation`, 2026-11-10)
+Source: FreeScout 1.8.248 in the demo container (`/www/html`, read-only, 2026-11-10):
+`app/Http/Controllers/ConversationsController.php` (`view()` 45, `create()` 400, `ajax()` case `send_reply` 707 and
+`save_draft` 1428, `getRedirectUrl()` 2859, `undoReply()` 3407), `routes/web.php` 66,
+`resources/views/conversations/create.blade.php`, `resources/views/conversations/editor_bottom_toolbar.blade.php`,
+`resources/views/conversations/partials/thread.blade.php` (recipients, 104-165), `app/Customer.php` (`create()` 937,
+`emailsToCustomers()` 1228), `app/Conversation.php` (constants 47-132, `setCc()`/`setBcc()` 1028/1042,
+`sanitizeEmails()` 1078), `app/Email.php` `sanitizeEmail()` 59, `app/Providers/EventServiceProvider.php` 82,
+`app/Listeners/SendReplyToCustomer.php`, `app/Jobs/SendReplyToCustomer.php` 320-361. Not exercised live yet.
+
+**Page.** `GET /mailbox/{id}/new-ticket` (`create()`, `authorize('view', $mailbox)`, so 403 without access) renders
+`create.blade.php`: `form#form-create.form-reply` with hidden `conversation_id` (empty), `mailbox_id`, `is_note`,
+`is_phone`, `type`, `thread_id` (empty), `customer_id`, `is_create=1`; `select#to[name="to[]"]`, `select#cc[name="cc[]"]`,
+`select#bcc[name="bcc[]"]`, `input#subject`, `textarea#body`; and (outside the form, moved in by JS)
+`#editor_bottom_toolbar` with `select[name=status]` (Active/Pending/Closed, never Spam; preselected from the mailbox's
+"ticket status" setting, nothing selected for "keep current"), `select[name=user_id]` (`-1` Anyone, the logged-in user
+as "Me", then `$mailbox->usersAssignable()`; preselected from the mailbox's "ticket assignee" setting) and
+`input#after_send`. `body[data-mailbox_id]` is printed by the toolbar. The usual CSRF meta tag is there (Session reads it).
+The UI autosaves with `form.serialize() + action=save_draft` and sends with `action=send_reply`; both carry `is_create=1`.
+
+**One POST each.** A sent conversation does not need a draft first: `send_reply` with `is_create=1` and **no**
+`conversation_id` (`$new = empty(conversation_id)`, 723) creates and publishes the conversation in one request. A draft
+is one `save_draft` with `is_create=1` and no `conversation_id`. The UI's own path (autosave draft, then
+`send_reply` + `is_create` + `conversation_id` + `thread_id`) would leave an orphan draft when the send fails, so the
+MCP uses the single POST for send mode.
+
+**`send_reply` + `is_create` (new email conversation).**
+- Type: `type` posted ⇒ `(int)type`, else email (`TYPE_EMAIL = 1`, 733-738). Phone (2) and custom (4) take other
+  branches (`name`/`phone`/`to_email`, no recipient check); the MCP pins `type=1`.
+- Validation (new + email, 788-794): `to` `required|array`, `subject` `required|string|max:998`, `body`
+  `required|string`, `cc`/`bcc` `nullable|array`. Then `$to_array = sanitizeEmails(request to)` (841); empty ⇒
+  `Incorrect recipients` (846). All of these answer `{status:"error", msg}` **before anything is saved**.
+- `Conversation::sanitizeEmails()` turns `Name email` / `Name <email>` into a **Customer record with that name** and
+  `MailHelper::sanitizeEmails` splits lists; one bare lowercase address passes through unchanged.
+- **Multiple `to`**: without `multiple_conversations`, the first address becomes To and the others are appended to CC
+  (`setCc`, 1037-1044; thread `setTo($to_array)`, 1125-1126). With `multiple_conversations=1` FreeScout creates and
+  emails **one separate conversation per address** (1320-1380). The MCP posts exactly one `to[]` and never
+  `multiple_conversations`.
+- Conversation (901-910): new, `subject`, `mailbox_id` from the request, `created_by_user_id` = the user, source web.
+  `Customer::create(to[0])` (975) **creates a Customer + Email record for a new address** (or reuses the existing one)
+  and sets `customer_id`; `customer_email = to[0]` (982).
+- Status: `(int)status ?: current` (987); a new conversation has none, so **always post it** (thread `status` is
+  `(int)status` too, 1116). Closed sets `closed_by_user_id`/`closed_at` (989).
+- Assignee (1002-1010): `user_id=-1` ⇒ unassigned; any other id is applied only when `$mailbox->userHasAccess(id)`,
+  **silently ignored otherwise** (stays unassigned). Omitted ⇒ `(int)null = 0`, equal to the new conversation's 0, so
+  nothing changes (no 500 here, unlike §5.1).
+- CC/BCC: conversation `setCc(sanitizeEmails(cc) minus to)` and `setBcc(bcc)`; the thread stores `cc`/`bcc` as posted
+  (1131-1132) "and filters when sending".
+- Thread (1095-1140): one `TYPE_MESSAGE` thread, `STATE_PUBLISHED`, `first = true`, `created_by_user_id` = the user,
+  `to = [to]`, `cc`, `bcc`. `from_alias` posted ⇒ sent from that mailbox alias (the MCP never posts it).
+- Events (1288-1294): `UserCreatedConversation` (listeners `SendReplyToCustomer`, `SendNotificationToUsers`,
+  `RefreshConversations`) and `\Helper::backgroundAction('conversation.created_by_user', …)` after
+  `getUndoTimeout()` = `Conversation::UNDO_TIMOUT` = **15 s**. The `SendReplyToCustomer` job (320-361) sends to the
+  thread's To + CC + BCC minus the mailbox's own addresses, plus the mailbox's **Auto BCC** setting if any.
+- Undo: as for replies (§5.3), `undoReply()` turns a just-created conversation (thread `first`) back into a draft
+  conversation (3469-3475) within 15 s, but only from the sending session's flash link. The MCP never calls it.
+- No duplicate check: two identical POSTs create two conversations and send two emails.
+- Response: `{status:"success", msg:"", redirect_url}`, **no conversation id**. `getRedirectUrl()` (2859-2898): with
+  `is_create` and `after_send` ≠ 1 it returns the **folder** URL (2869); with `after_send=1`
+  (`MailboxUser::AFTER_SEND_STAY`) it returns `$conversation->url()` = `…/conversation/{id}?folder_id=N`. `after_send`
+  posted by the request wins over the user's saved setting and is not stored; it only picks the redirect and the flash
+  text. So the MCP posts `after_send=1` and reads the id from `redirect_url`.
+
+**`save_draft` + `is_create` (new draft conversation, nothing sent).**
+- Same `Mailbox::findOrFail` + `can('view')`. No `conversation_id` ⇒ new conversation. A `conversation_id` that is
+  not a draft conversation with `is_create` ⇒ `Message has been already sent. Please discard this draft.` (1493-1500).
+  No validation at all ("fields can be empty").
+- `$to_array = sanitizeEmails(to)`; with exactly one address `$to = to[0]` and
+  `Customer::create($customer_email)` is called with **`$customer_email = ''`** (the assignment from `to` is commented
+  out, 1547), so `Customer::create('')` returns `null` (`Email::sanitizeEmail('')` is false): **no Customer record is
+  created**; `customer_id` stays null, `customer_email = ''`; the address lives only in the thread's `to`. (With several
+  addresses `to` is the list and `customer` stays null too.) Note `sanitizeEmails` would still create a Customer for a
+  `Name email` form, which the MCP never sends.
+- Conversation: `state = STATE_DRAFT (1)`, `status = $request->status` **raw** (1566: not posting it stores NULL into a
+  NOT NULL column), `subject`, `mailbox_id`, `type`, `created_by_user_id`, `setCc(cc)`/`setBcc(bcc)` (1609-1610).
+  **`user_id` is never read**: a draft conversation is unassigned whatever is posted.
+- Thread (1615-1660): `STATE_DRAFT`, `TYPE_MESSAGE` (`TYPE_NOTE` only with `is_note`), `first`, `user_id` and
+  `created_by_user_id` = the user, `to`, `cc`, `bcc`, `body` as posted (stored raw), `from = from_alias ?? null`.
+- Added to the Drafts folder (1664); `UserCreatedConversationDraft` event (notifications only, nothing is emailed).
+- Response (1666-1669): `{status:"success", msg:"", conversation_id, customer_id (null), thread_id, number}`.
+
+**Viewing a draft conversation.** `GET /conversation/{id}` of a `state = 1` conversation renders **`create.blade.php`**
+instead of the conversation view (`view()` 247-248): no `.thread` divs, no status/assignee menus, no Tags controls;
+`form#form-create` is pre-filled with `conversation_id`, `thread_id` (the draft thread), `mailbox_id`, `type`,
+`to[]` (the first thread's To, as `<option value="email" selected>`; labels from `Customer::emailsToCustomers()`, a
+read-only lookup that builds unsaved dummy customers), `cc[]`/`bcc[]` (the conversation's `getCcArray()` /
+`getBccArray()`), `subject` and `body` (the stored HTML, escaped in the textarea). The toolbar's
+`select[name=status][data-note-status]` carries the stored status, but the **option preselected for sending** follows
+the mailbox's "ticket status" setting (only "keep current" preselects the stored one), and the assignee select follows
+the mailbox's "ticket assignee" setting. A human sends it from that page (`send_reply` + `is_create` +
+`conversation_id` + `thread_id`, with whatever status/assignee the form shows then).
+`discard_draft` with the draft thread id deletes the whole draft conversation (§5.2).
+
+**Tags.** The Tags module is not on the demo and the create view has no tag controls, so whether `tags/ajax add` works
+on a draft conversation is **not verified**. The MCP's `add_tag` refuses draft conversations anyway (§9).
 
 ---
 
