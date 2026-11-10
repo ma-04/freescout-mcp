@@ -11,6 +11,12 @@
  * on top of the variables above (demo only, never production). It is deliberately not the server's
  * FREESCOUT_REPLY_ENABLED, so an operator who has replies enabled does not send email by running the note/draft tests. They reply on Support conversation 1; reseed afterwards
  * (demo/reset.sh), because the replies stay in the conversation.
+ *
+ * create_conversation leaves a conversation behind that this MCP cannot delete, so its live tests need their own
+ * test-only opt-ins (demo only): FREESCOUT_CREATE_LIVE_TEST=1 creates a DRAFT conversation in Support (nothing is
+ * emailed); FREESCOUT_CREATE_SEND_LIVE_TEST=1 additionally SENDS one new conversation (to FREESCOUT_CREATE_LIVE_TO,
+ * default mcp-live-test@example.com, plus a cc and a bcc on example.com). With FREESCOUT_DEMO_SSH the database is checked
+ * (state, customers, send_logs). Reseed afterwards (demo/reset.sh).
  */
 import { execFileSync } from "node:child_process";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -24,6 +30,9 @@ import * as stats from "../src/stats.js";
 const { FREESCOUT_URL: url, FREESCOUT_USER: user, FREESCOUT_PASSWORD: password, FREESCOUT_DEMO_SSH: sshHost } = process.env;
 const enabled = Boolean(url && user && password);
 const replyLive = enabled && process.env.FREESCOUT_REPLY_LIVE_TEST === "1";
+const createLive = enabled && process.env.FREESCOUT_CREATE_LIVE_TEST === "1";
+const createSendLive = createLive && process.env.FREESCOUT_CREATE_SEND_LIVE_TEST === "1";
+const createTo = process.env.FREESCOUT_CREATE_LIVE_TO || "mcp-live-test@example.com";
 
 /** Run SQL in the demo DB container; the password is read from the server's .env, never sent from here. */
 function sql(query: string): string[][] {
@@ -241,4 +250,71 @@ describe.skipIf(!replyLive)("live send_reply as the restricted agent (sends emai
     const customer = conv.threads.find((t) => t.type === "customer" && t.thread_id !== null)!;
     await expect(ops.sendReply(c, 1, { draftThreadId: customer.thread_id! }, gate)).rejects.toThrow(/not a reply draft/);
   }, 60_000);
+});
+
+describe.skipIf(!createLive)("live create_conversation as the restricted agent (demo only; leaves a conversation)", () => {
+  let c: FreeScoutClient;
+  beforeAll(() => {
+    c = new FreeScoutClient(new Session({ baseUrl: url!, user, password, logger: silentLogger, timeoutMs: 20_000 }));
+  });
+
+  it("draft: a state-1 conversation in Support, recipients stored, no Customer record, nothing emailed", async () => {
+    const to = `draft-${Date.now()}@example.com`;
+    const dbNow = sshHost ? sql("select now();")[0]![0]! : undefined;
+    const r = await ops.createConversation(
+      c,
+      { mailbox_id: 1, to, cc: ["cc-draft@example.com"], subject: `Integration draft conversation ${Date.now()}`, body: "Draft body\n\nsecond paragraph" },
+      { reply: { enabled: false, mailboxes: [] }, createSend: false },
+    );
+    expect(r).toMatchObject({ mode: "draft", sent: false, mailbox_id: 1, to, cc: ["cc-draft@example.com"] });
+    const conv = await ops.getConversation(c, r.conversation_id);
+    expect(conv.is_draft_conversation).toBe(true);
+    if (!sshHost) return;
+    await new Promise((res) => setTimeout(res, 5000));
+    const [row] = sql(`select state, mailbox_id, ifnull(customer_id,'NULL'), ifnull(user_id,'NULL') from conversations where id = ${r.conversation_id};`);
+    expect(row).toEqual(["1", "1", "NULL", "NULL"]); // STATE_DRAFT, Support, no customer, unassigned
+    expect(sql(`select count(*) from emails where email = '${to}';`)).toEqual([["0"]]); // no Customer/Email record
+    expect(sql(`select count(*) from send_logs where created_at >= '${dbNow}' and email in ('${to}', 'cc-draft@example.com');`)).toEqual([["0"]]);
+    console.log(`[db] draft conversation ${r.conversation_id}: ${JSON.stringify(row)}`);
+  }, 90_000);
+
+  it("refusals post nothing: Billing (2) is not accessible; assignee/tags in draft mode; send=true with the gate off", async () => {
+    const off = { reply: { enabled: false, mailboxes: [] }, createSend: false };
+    const base = { mailbox_id: 1, to: createTo, subject: "should not exist", body: "x" };
+    await expect(ops.createConversation(c, { ...base, mailbox_id: 2 }, off)).rejects.toThrow();
+    await expect(ops.createConversation(c, { ...base, assignee: "me" }, off)).rejects.toThrow(/assignee only works with send=true/);
+    await expect(ops.createConversation(c, { ...base, tags: ["x"] }, off)).rejects.toThrow(/tags only work with send=true/);
+    await expect(ops.createConversation(c, { ...base, send: true }, off)).rejects.toThrow(/sending new conversations is disabled/);
+  }, 60_000);
+});
+
+describe.skipIf(!createSendLive)("live create_conversation send=true (SENDS EMAIL; demo only)", () => {
+  let c: FreeScoutClient;
+  beforeAll(() => {
+    c = new FreeScoutClient(new Session({ baseUrl: url!, user, password, logger: silentLogger, timeoutMs: 20_000 }));
+  });
+
+  it("send: one published conversation, one message, emailed to the requested to/cc/bcc only", async () => {
+    const dbNow = sshHost ? sql("select now();")[0]![0]! : undefined;
+    const cc = "cc-live@example.com";
+    const bcc = "bcc-live@example.com";
+    const r = await ops.createConversation(
+      c,
+      { mailbox_id: 1, to: createTo, cc: [cc], bcc: [bcc], subject: `Integration sent conversation ${Date.now()}`, body: "Sent body", status: "pending", assignee: "unassigned", send: true },
+      { reply: { enabled: true, mailboxes: [1] }, createSend: true },
+    );
+    expect(r).toMatchObject({ mode: "sent", sent: true, mailbox_id: 1, to: createTo, cc: [cc], bcc: [bcc], status: "pending" });
+    if (!sshHost) return;
+    await new Promise((res) => setTimeout(res, 25_000));
+    const [row] = sql(`select state, status, ifnull(user_id,'NULL'), customer_email from conversations where id = ${r.conversation_id};`);
+    expect(row).toEqual(["2", "2", "NULL", createTo]);
+    const [th] = sql(`select type, state from threads where id = ${r.thread_id};`);
+    expect(th).toEqual(["2", "2"]);
+    const logs = sql(`select email from send_logs where thread_id = ${r.thread_id};`).map((l) => l[0]!.toLowerCase());
+    const allowed = new Set([createTo, cc, bcc]);
+    expect(logs.every((e) => allowed.has(e))).toBe(true);
+    const others = sql(`select email from send_logs where created_at >= '${dbNow}' and mail_type = 1;`).map((l) => l[0]!.toLowerCase());
+    expect(others.every((e) => allowed.has(e))).toBe(true);
+    console.log(`[db] sent conversation ${r.conversation_id}: ${JSON.stringify(row)}; send_logs: ${JSON.stringify(logs)}`);
+  }, 120_000);
 });
