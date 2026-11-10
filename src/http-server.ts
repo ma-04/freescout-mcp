@@ -57,6 +57,11 @@ export interface HttpServerOptions {
    * send_reply is not registered). Shared by every session; no request header can set or widen it.
    */
   reply?: ReplyGate;
+  /**
+   * Parsed FREESCOUT_CREATE_SEND from the server environment (default: off, so create_conversation only makes drafts).
+   * Counts only together with `reply.enabled`. Shared by every session; no request header can set it.
+   */
+  createSend?: boolean;
   fetchImpl?: typeof fetch;
   logger?: Logger;
   now?: () => number;
@@ -114,6 +119,7 @@ export function createMcpHttpServer(opts: HttpServerOptions): McpHttpServer {
     enabled: opts.reply?.enabled === true,
     mailboxes: Object.freeze([...(opts.reply?.mailboxes ?? [])]) as number[],
   });
+  const createSend = opts.createSend === true && reply.enabled;
   let pending = 0;
 
   const forget = (id: string, why: string): Entry | undefined => {
@@ -154,7 +160,7 @@ export function createMcpHttpServer(opts: HttpServerOptions): McpHttpServer {
       now,
     });
     const server = new McpServer({ name: "freescout-mcp", version: VERSION });
-    registerTools(server, { client: new FreeScoutClient(session), forwardAllow, statsDelayMs: opts.statsDelayMs, reply });
+    registerTools(server, { client: new FreeScoutClient(session), forwardAllow, statsDelayMs: opts.statsDelayMs, reply, createSend });
     const transport: StreamableHTTPServerTransport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       enableJsonResponse: true,
