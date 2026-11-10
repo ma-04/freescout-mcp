@@ -131,8 +131,9 @@ export interface FreeScoutPort {
   readonly baseUrl?: URL;
   getHtml(path: string): Promise<HtmlPage>;
   /**
-   * Array values are sent as repeated `key[]` pairs. Two array-valued keys exist: add_tag's tag_names (pinned by
-   * assertTagForm; remove_tag's form has no arrays, assertTagRemoveForm) and forward's to_email, exactly one element (pinned by assertForwardForm).
+   * Array values are sent as repeated `key[]` pairs. Array-valued keys: add_tag's tag_names (pinned by
+   * assertTagForm; remove_tag's form has no arrays, assertTagRemoveForm), forward's to_email, exactly one element (pinned by
+   * assertForwardForm), and create_conversation's to (exactly one) / cc / bcc (pinned by assertCreateForm).
    */
   ajaxPost<T = unknown>(path: string, form: Record<string, string | readonly string[]>): Promise<T>;
 }

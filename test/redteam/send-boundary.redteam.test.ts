@@ -229,7 +229,8 @@ describe("RT: close/forward guards", () => {
     expect(src.match(/action: "conversation_change_status",/g)).toHaveLength(1); // buildStatusForm only
     expect(src.match(/subtype: "1",/g)).toHaveLength(1); // buildForwardForm only
     // buildNoteForm + buildForwardForm + buildReplyForm (customer reply, gated, 2026-11-07; see "RT: send_reply" below)
-    expect(src.match(/action: "send_reply",/g)).toHaveLength(3);
+    // + buildCreateSendForm (new conversation, gated by FREESCOUT_CREATE_SEND, 2026-11-10; see "RT: create_conversation")
+    expect(src.match(/action: "send_reply",/g)).toHaveLength(4);
   });
 
   it("closeConversation posts nothing on an already-closed conversation and never sends assignee/status fields", async () => {
@@ -270,14 +271,15 @@ describe("RT: the one Reports POST (/reports/ajax) only ever computes a report",
     // Total `port.ajaxPost<...>(` call sites in src/ (2026-10-31), pinned so a new POST anywhere fails here:
     //   src/operations.ts: list_tags autocomplete, add_tag, remove_tag (TAGS_AJAX); add_note, save_draft,
     //     discard_draft, remove_note (delete_thread, 2026-11-04), close_conversation, forward (send_reply),
-    //     send_reply's read-only load_draft and the customer reply itself (2026-11-07) (AJAX)
+    //     send_reply's read-only load_draft and the customer reply itself (2026-11-07), create_conversation's draft
+    //     POST and its gated send POST (2026-11-10) (AJAX)
     //   src/reports.ts: fetchReport (REPORTS_AJAX)
     // Not counted: the Session/FreeScoutClient/FreeScoutPort definitions, the client's passthrough
     // (this.session.ajaxPost) and ticket_volume's refusing stub (`ajaxPost: () => Promise.reject`).
-    expect(src.match(/\bport\.ajaxPost\s*(?:<[^()]*>)?\(/g)).toHaveLength(12);
-    expect(src.match(/\.ajaxPost\s*(?:<[^()]*>)?\(/g)).toHaveLength(13); // + the client passthrough
+    expect(src.match(/\bport\.ajaxPost\s*(?:<[^()]*>)?\(/g)).toHaveLength(14);
+    expect(src.match(/\.ajaxPost\s*(?:<[^()]*>)?\(/g)).toHaveLength(15); // + the client passthrough
     expect(src.match(/action: "report",/g)).toHaveLength(1); // buildReportForm only
-    expect(src.match(/action: "send_reply",/g)).toHaveLength(3);
+    expect(src.match(/action: "send_reply",/g)).toHaveLength(4);
     expect(src.match(/action: "conversation_change_status",/g)).toHaveLength(1);
   });
 
@@ -303,10 +305,10 @@ describe("RT: the one Reports POST (/reports/ajax) only ever computes a report",
     const calls = firstArgs.filter((a) => a !== "path: string" && a !== "path");
     expect(definitions).toHaveLength(3);
     expect(passthrough).toHaveLength(1);
-    expect(calls.filter((a) => a === "AJAX")).toHaveLength(8); // + remove_note (2026-11-04), + load_draft and send_reply (2026-11-07)
+    expect(calls.filter((a) => a === "AJAX")).toHaveLength(10); // + remove_note (2026-11-04), + load_draft and send_reply (2026-11-07), + create draft/send (2026-11-10)
     expect(calls.filter((a) => a === "TAGS_AJAX")).toHaveLength(3); // list_tags autocomplete, add_tag, remove_tag
     expect(calls.filter((a) => a === "REPORTS_AJAX")).toHaveLength(1);
-    expect(calls, "every call site uses one of the three constants").toHaveLength(12);
+    expect(calls, "every call site uses one of the three constants").toHaveLength(14);
     // No other way of reaching ajaxPost: the occurrences above plus ticket_volume's refusing stub are all there is.
     expect(src.match(/\bajaxPost\b/g)).toHaveLength(firstArgs.length + 1);
     expect(src.match(/ajaxPost: \(\) => Promise\.reject/g)).toHaveLength(1);
