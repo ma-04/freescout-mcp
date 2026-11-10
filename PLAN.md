@@ -221,3 +221,26 @@ behind server-side configuration only. Decisions from the planning questions:
 | Refusals | Spam conversations, unsent draft conversations, mailboxes outside the list, empty customer email. Mailbox id comes from the page, never the caller. |
 | Safety | Pinned form + `assertReplyForm` (exact keys; never `is_note`, `subtype`, `is_create`, `to`, `to_email`, `cc`, `bcc`); after-state re-read (new reply: exactly one new `message` thread; draft: same thread flipped draft → message, thread count unchanged); `POSSIBLY SENT:` semantics as forward; concurrent-change warning. |
 | Testing | Unit + red-team on the fake server; live send on the demo as the restricted agent, verified via DB (`threads.type=2`, `send_logs` to customer only); demo reseeded afterwards. PR only: no merge, no hosted deploy. |
+
+Scope update (2026-11-10, user): **`create_conversation`** (new outbound conversation). Draft mode is always available;
+send mode is gated. This moves "new outbound conversation" (`is_create`) out of docs/freescout-endpoints.md §5.3a
+"NEVER send", for this tool's pinned forms only. Decisions from the planning questions:
+
+| Topic | Decision |
+|---|---|
+| Tool shape | `create_conversation(mailbox_id, to, subject, body, cc?, bcc?, assignee?, status?, tags?, send?)`. `send` defaults to `false` (draft). The `send` parameter is always in the schema. |
+| Draft mode | Always registered, no env needed. Creates a new draft conversation (`state=1`); no email goes out; a human opens it in FreeScout and clicks Send. |
+| Send mode | Needs **both** `FREESCOUT_REPLY_ENABLED=1` and a new optional `FREESCOUT_CREATE_SEND=1` (exactly `1`/`true`; unset/empty/`0`/`false` = off; anything else stops the server at startup; `CREATE_SEND` without `REPLY_ENABLED` = off + startup warning). `FREESCOUT_REPLY_MAILBOXES`, when set, also limits send mode. `send=true` while the gate is off is refused before any POST: never silently downgraded to a draft. Server environment only. Existing installs (even with replies on) are unchanged: the new variable defaults off, so `FREESCOUT_REPLY_ENABLED` keeps its meaning. |
+| Recipients | Any address. `to` is exactly one address; `cc`/`bcc` optional lists. Every address must pass `isStrictRecipient` (one bare lowercase address; FreeScout reinterprets `Name <email>` and splits lists). Cap cc+bcc count (e.g. 10). No `multiple_conversations`. |
+| Mailbox | Caller-supplied `mailbox_id`: must be a mailbox the account can access (checked against the mailbox list before any POST), checked against `FREESCOUT_REPLY_MAILBOXES` for send mode, and confirmed on the after-state re-read. |
+| Assignee / status / tags | `assignee`: `me` / `unassigned` / user id (validated against the mailbox's assignee list). `status`: `active` / `pending` / `closed` (never spam). `tags`: applied after creation through the existing tag path. If FreeScout does not persist one of these in draft mode, refuse that parameter in draft mode rather than silently dropping it. |
+| Safety | Own `build…Form` / `assert…Form` pair(s) for create-draft and create-send (exact keys, pinned `type` = email, exactly one `to`, asserted right before the POST). `assertNoteForm`, `assertReplyForm`, `buildDraftForm` stay exactly as strict as now. After-state re-read of the created conversation: mailbox, one thread, right thread type/state, recipients exactly as requested. Ambiguous response on send → `POSSIBLY SENT:` (never a retryable-looking error). Tag failure after creation reports the created id and sent state plus the failure, so the caller does not retry and send a duplicate. |
+| Broken invariant | docs/REDTEAM.md:59 relied on "the agent cannot create a draft conversation". Re-audit every tool taking `conversation_id` (send_reply, discard_draft, save_draft, add_note, close, forward, tags, remove_note) against an MCP-made draft conversation. Red-team target: an ungated draft that gets *sent* by any path while the gate is off. |
+| Cleanup | `discard_draft` refuses draft conversations, so the MCP can create drafts it cannot delete. Documented; `discard_draft` is not widened this round. If creating a draft creates a Customer record for a new address, document that ungated draft mode is a persistent write. |
+| Backwards compat | New tool + one new optional env var only. No tool, parameter or variable renamed or changed. |
+| Testing | Unit + red-team on the fake server; registry tests (tool present always; send refused without both vars). Live on the demo as the restricted agent: draft (no `send_logs`), send (`send_logs` to the requested to/cc/bcc only). Demo reseeded afterwards. Old-`main` install check per CLAUDE.md. PR only: no merge, no hosted deploy. |
+
+Wire facts to verify from the FreeScout source (demo container) before coding: one POST (`send_reply` + `is_create`)
+vs `save_draft`+`is_create` then send; exact shape of `to`/`cc`/`bcc`/`type`/`user_id`/`status`; whether draft mode
+persists `user_id`/`status`; whether tags work on a `state=1` conversation; whether a draft creates a Customer; the
+response (new id or redirect); undo-send delay. Recorded in docs/freescout-endpoints.md (§5.2 / new §5.7, §5.3a).
