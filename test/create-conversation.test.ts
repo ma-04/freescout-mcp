@@ -26,7 +26,9 @@ import {
   buildNoteForm,
   buildReplyForm,
   createConversation,
+  CREATE_SEND_RECENT_MS,
   MAX_CREATE_CC,
+  resetCreateSendHistoryForTests,
   type CreateConversationInput,
   type CreateGate,
 } from "../src/operations.js";
@@ -47,12 +49,14 @@ let client: FreeScoutClient;
 let cleanup: (() => Promise<unknown>) | undefined;
 
 beforeEach(async () => {
+  resetCreateSendHistoryForTests();
   fs = new FakeFreeScout();
   fs.dashboardMailboxes = [[1, "Support"], [2, "Billing"]];
   await fs.start();
   client = new FreeScoutClient(new Session({ baseUrl: fs.base, cookie: fs.mintLoggedInCookie(), logger: silentLogger, timeoutMs: 5000 }));
 });
 afterEach(async () => {
+  resetCreateSendHistoryForTests();
   await cleanup?.();
   cleanup = undefined;
   await fs.stop();
@@ -450,6 +454,84 @@ describe("send mode (FREESCOUT_REPLY_ENABLED + FREESCOUT_CREATE_SEND)", () => {
     fs.logoutAll();
     await expect(create({ send: true })).rejects.toBeInstanceOf(AuthError);
     expect(fs.emails).toEqual([]);
+  });
+});
+
+// ------------------------------------------------------------------------------------------------
+describe("send mode: an identical send is not repeated within the window", () => {
+  let now = 1_000_000;
+  beforeEach(() => {
+    now = 1_000_000;
+    resetCreateSendHistoryForTests(() => now);
+  });
+
+  it("POSSIBLY SENT, then the same call: refused with zero further POSTs (and no second email)", async () => {
+    fs.misbehave.createDropsConnection = true;
+    await expect(create({ send: true })).rejects.toThrow(/^POSSIBLY SENT:/);
+    expect(fs.emails).toHaveLength(1);
+    fs.misbehave = {}; // without the guard, the retry would now go through and email again
+    const before = posts().length;
+    const e = await create({ send: true }).catch((x) => x);
+    expect(e).toBeInstanceOf(FreeScoutError);
+    expect(e.message).toMatch(/^Refusing to create the conversation: an identical create_conversation .* ended in POSSIBLY SENT/);
+    expect(e.message).toMatch(/check mailbox 1 \(look for the subject/i);
+    expect(e.message).toMatch(/instead of retrying/);
+    expect(posts()).toHaveLength(before);
+    expect(fs.emails).toHaveLength(1);
+  });
+
+  it("success, then the same call (subject differing only in case/whitespace): refused, naming the conversation and URL", async () => {
+    const r = await create({ send: true });
+    expect(r.sent).toBe(true);
+    const before = posts().length;
+    now += 5 * 60 * 1000;
+    const e = await create({ send: true, subject: "  quarterly   INVOICE " }).catch((x) => x);
+    expect(e.message).toMatch(/with send=true sent about 5 minute\(s\) ago/);
+    expect(e.message).toContain(`conversation 300 (${fs.base}/conversation/300)`);
+    expect(posts()).toHaveLength(before);
+    expect(fs.emails).toHaveLength(1);
+  });
+
+  it("DANGER, then the same call: refused", async () => {
+    fs.misbehave.createShowsCc = ["victim@evil.example"];
+    await expect(create({ send: true })).rejects.toThrow(/^DANGER:/);
+    fs.misbehave = {};
+    const before = posts().length;
+    await expect(create({ send: true })).rejects.toThrow(/ended in DANGER \(probably sent\).*conversation 300/);
+    expect(posts()).toHaveLength(before);
+  });
+
+  it("a different subject, recipient or user is allowed", async () => {
+    await create({ send: true });
+    await expect(create({ send: true, subject: "Another subject" })).resolves.toMatchObject({ sent: true });
+    await expect(create({ send: true, to: "other@vendor.example" })).resolves.toMatchObject({ sent: true });
+    const other = new FreeScoutClient(new Session({ baseUrl: fs.base, cookie: fs.mintLoggedInCookie(8), logger: silentLogger, timeoutMs: 5000 }));
+    await expect(createConversation(other, { mailbox_id: 1, to: TO, subject: "Quarterly invoice", body: "b", send: true }, SEND)).resolves.toMatchObject({ sent: true });
+    expect(fs.emails).toHaveLength(4);
+  });
+
+  it("after the window expires the same call is allowed again", async () => {
+    await create({ send: true });
+    now += CREATE_SEND_RECENT_MS - 1;
+    await expect(create({ send: true })).rejects.toThrow(/an identical create_conversation/);
+    now += 1;
+    await expect(create({ send: true })).resolves.toMatchObject({ sent: true });
+    expect(fs.emails).toHaveLength(2);
+  });
+
+  it("a send FreeScout provably refused (error envelope) does not block the retry", async () => {
+    fs.misbehave.createAnswer = { status: "error", msg: "Incorrect recipients" };
+    await expect(create({ send: true })).rejects.toThrow(/Incorrect recipients/);
+    fs.misbehave = {};
+    await expect(create({ send: true })).resolves.toMatchObject({ sent: true });
+  });
+
+  it("draft mode is never blocked, before or after a send", async () => {
+    await create({}, OFF);
+    await create({ send: true });
+    await expect(create({}, OFF)).resolves.toMatchObject({ mode: "draft" });
+    await expect(create({}, SEND)).resolves.toMatchObject({ mode: "draft" });
+    expect(fs.createdDrafts).toHaveLength(3);
   });
 });
 

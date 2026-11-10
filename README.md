@@ -445,7 +445,10 @@ restricted agent, plus offline regression suites in `test/redteam/`). Verdict: n
   (5) The created conversation is re-read (mailbox, draft/sent state, one message by the agent, To/Cc/Bcc exactly as
   requested, subject); after sending, mismatches are `DANGER` and ambiguous failures `POSSIBLY SENT:`. (6) With the send
   gate off, no tool can get an MCP-created draft sent: every tool taking a conversation id refuses draft conversations
-  (red-team test in `test/redteam/`).
+  (red-team test in `test/redteam/`). (7) FreeScout has no duplicate check, so after a send that was sent, `POSSIBLY
+  SENT` or `DANGER`, the same `send: true` call (same FreeScout user, mailbox, `to` and subject, ignoring case and extra
+  spaces) is refused for 20 minutes, naming the earlier conversation; check it in FreeScout instead of retrying. The
+  memory is per server process (a restart clears it); drafts are never blocked.
 - **Drafts are confined.** `save_draft` never sends `is_note`/`subtype`/`is_create`; updating or discarding requires
   a thread that is a draft on the same conversation. Unsent draft *conversations* are refused by every write tool,
   because `send_reply` there would publish them. The only forms with `is_create` are `create_conversation`'s.

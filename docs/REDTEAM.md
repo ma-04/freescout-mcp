@@ -525,7 +525,13 @@ Guards:
   (send) or `POSSIBLY CREATED:` (draft). A tag failure after sending is returned in the result (`tags_error`, the id,
   `sent: true`), never as a retryable-looking error; a missing Tags module is detected before sending.
 - **Duplicates.** FreeScout has none; an in-process lock refuses a second identical call (mailbox + to + subject) while
-  the first is in flight.
+  the first is in flight. Review fix: send-mode outcomes are also remembered for 20 minutes (process-wide, keyed by
+  FreeScout URL + logged-in user id + mailbox + `to` + normalised subject; claimed as `possibly_sent` synchronously right
+  before the POST, released only when FreeScout provably refused it, upgraded to `sent`/`danger` afterwards), so a retry
+  after success, `POSSIBLY SENT` or `DANGER` is refused before any request, naming the earlier conversation. Drafts are
+  not affected. Tests: "send mode: an identical send is not repeated" in `test/create-conversation.test.ts`, "RT:
+  create_conversation does not send the same conversation twice" in `send-boundary.redteam.test.ts`. Residual: the
+  memory is lost on restart, and another process or a human in the UI can still send a duplicate.
 
 Residual risks (by design): ungated draft mode is a persistent write the MCP cannot undo (drafts stay until a human
 discards them; no Customer record is created for a draft); in send mode the recipient can be anyone and the email cannot

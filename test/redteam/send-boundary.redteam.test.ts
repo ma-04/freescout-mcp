@@ -19,7 +19,7 @@ import { silentLogger } from "../../src/log.js";
 import {
   addNote, assertForwardForm, assertNoteForm, assertStatusForm, buildDraftForm, buildForwardForm, buildNoteForm,
   assertDeleteThreadForm, closeConversation, discardDraft, forwardConversation, formatBody, removeNote, saveDraft,
-  assertReplyForm, buildReplyForm, selectedValues, sendReply,
+  assertReplyForm, buildReplyForm, selectedValues, sendReply, resetCreateSendHistoryForTests,
 } from "../../src/operations.js";
 import { assertReportForm, buildReportForm, REPORTS_AJAX } from "../../src/reports.js";
 import { Session } from "../../src/session.js";
@@ -806,5 +806,54 @@ describe("RT: create_conversation drafts cannot be sent while the gate is off", 
     expect(index).toMatch(/registrars[\s\S]*registerCreateConversation,[\s\S]*\];/);
     const tool = readFileSync(fileURLToPath(new URL("../../src/tools/create-conversation.ts", import.meta.url)), "utf8");
     expect(tool).toMatch(/createSend: createSend === true && \(reply \?\? REPLY_DISABLED\)\.enabled/);
+  });
+});
+
+// create_conversation duplicates (review fix, 2026-11-10). FreeScout has no duplicate check, so a caller retrying after
+// POSSIBLY SENT / DANGER / success would email the recipient again. The server remembers recent send-mode outcomes
+// (per FreeScout user + mailbox + to + normalised subject) and refuses the same send before any request is posted.
+describe("RT: create_conversation does not send the same conversation twice", () => {
+  afterEach(() => resetCreateSendHistoryForTests());
+
+  it("through the MCP tool: POSSIBLY SENT, then retries (incl. subject case/spacing) are refused with zero further POSTs", async () => {
+    resetCreateSendHistoryForTests();
+    const fs = new FakeFreeScout();
+    fs.dashboardMailboxes = [[1, "Support"]];
+    await fs.start();
+    try {
+      const client = new FreeScoutClient(new Session({ baseUrl: fs.base, cookie: fs.mintLoggedInCookie(), logger: silentLogger, timeoutMs: 5000 }));
+      const server = new McpServer({ name: "t", version: "0" });
+      registerTools(server, { client, forwardAllow: [], reply: { enabled: true, mailboxes: [] }, createSend: true });
+      const [a, b] = InMemoryTransport.createLinkedPair();
+      const mcp = new Client({ name: "c", version: "0" });
+      await Promise.all([server.connect(a), mcp.connect(b)]);
+      try {
+        const args = { mailbox_id: 1, to: "customer@vendor.example", subject: "Your invoice", body: "Hello", send: true };
+        fs.misbehave.createDropsConnection = true;
+        const first = await mcp.callTool({ name: "create_conversation", arguments: args });
+        expect(first.isError).toBe(true);
+        expect(fs.emails).toHaveLength(1);
+        fs.misbehave = {};
+        const postsBefore = fs.requests.filter((r) => r.method === "POST").length;
+        for (const subject of ["Your invoice", "  your   INVOICE "]) {
+          const r = await mcp.callTool({ name: "create_conversation", arguments: { ...args, subject } });
+          expect(r.isError).toBe(true);
+          expect((r as { content: Array<{ text: string }> }).content[0]!.text).toMatch(/an identical create_conversation .*POSSIBLY SENT.*instead of retrying/);
+        }
+        expect(fs.requests.filter((r) => r.method === "POST")).toHaveLength(postsBefore);
+        expect(fs.emails).toHaveLength(1);
+      } finally {
+        await Promise.all([mcp.close(), server.close()]);
+      }
+    } finally {
+      await fs.stop();
+    }
+  });
+
+  it("source scan: the outcome is claimed synchronously right before the one send POST, and released only on proven refusals", () => {
+    const src = srcCode();
+    expect(src).toMatch(/assertCreateForm\(form, "send"\);\s*const prior = claimCreateSend\(sendKey\);\s*if \(prior\) throw refuse\([^\n]*\n[\s\S]{0,600}res = await port\.ajaxPost<typeof res>\(AJAX, form\);/);
+    expect(src.match(/\bnotSent\(e\)/g)).toHaveLength(3); // PermissionError/AuthError from the POST, PermissionError envelope, FreeScout's error envelope
+    expect(src.match(/\bclaimCreateSend\(/g)).toHaveLength(2); // definition + createAndSend
   });
 });

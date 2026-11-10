@@ -2695,6 +2695,71 @@ function recipientList(raw: unknown, name: string): string[] {
 const CREATE_IN_FLIGHT = new Set<string>();
 
 /**
+ * Recent send-mode outcomes in this process (all sessions), so a retry after a send that went out (or may have) is
+ * refused instead of emailing the recipient again: FreeScout has no duplicate check. Keyed by FreeScout instance +
+ * logged-in user id + mailbox + `to` + normalised subject. An entry is set (as possibly_sent) right before the POST,
+ * dropped only when FreeScout provably refused it, and upgraded to sent/danger afterwards. Draft mode never uses it.
+ */
+export const CREATE_SEND_RECENT_MS = 20 * 60 * 1000;
+const CREATE_SEND_RECENT_MAX = 500;
+type CreateSendOutcome = "sent" | "possibly_sent" | "danger";
+interface CreateSendRecord {
+  at: number;
+  outcome: CreateSendOutcome;
+  conversationId: number | null;
+  url: string | null;
+}
+const CREATE_SEND_RECENT = new Map<string, CreateSendRecord>();
+let createSendNow: () => number = () => Date.now();
+
+/** Tests only: forget every recorded send and optionally replace the clock (undefined = Date.now). */
+export function resetCreateSendHistoryForTests(now?: () => number): void {
+  CREATE_SEND_RECENT.clear();
+  createSendNow = now ?? (() => Date.now());
+}
+
+const normalizeCreateSubject = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
+
+function createSendKey(port: FreeScoutPort, userId: number | null, mailboxId: number, to: string, subject: string): string {
+  // An unknown user id shares one bucket: over-blocks rather than letting a duplicate through.
+  return [port.baseUrl?.href ?? "", userId ?? "?", mailboxId, to.trim().toLowerCase(), normalizeCreateSubject(subject)].join("\n");
+}
+
+function recentCreateSend(key: string): CreateSendRecord | undefined {
+  const now = createSendNow();
+  for (const [k, r] of CREATE_SEND_RECENT) if (now - r.at >= CREATE_SEND_RECENT_MS) CREATE_SEND_RECENT.delete(k);
+  return CREATE_SEND_RECENT.get(key);
+}
+
+function recentSendRefusal(r: CreateSendRecord, to: string, mailboxId: number): string {
+  const mins = Math.max(0, Math.round((createSendNow() - r.at) / 60000));
+  const what =
+    r.outcome === "sent" ? "sent" : r.outcome === "danger" ? "ended in DANGER (probably sent)" : "ended in POSSIBLY SENT (it may have been sent)";
+  const where =
+    r.conversationId !== null
+      ? `conversation ${r.conversationId}${r.url ? ` (${r.url})` : ""}`
+      : `mailbox ${mailboxId} (look for the subject; the earlier call did not learn the new id)`;
+  return (
+    `an identical create_conversation (same agent, mailbox ${mailboxId}, to ${to}, subject) with send=true ${what} about ${mins} ` +
+    `minute(s) ago. FreeScout has no duplicate check, so the recipient would get it twice. Check ${where} in FreeScout instead ` +
+    `of retrying; this server refuses the same send for ${CREATE_SEND_RECENT_MS / 60000} minutes. This call did nothing`
+  );
+}
+
+/** Synchronous check-and-claim right before the send POST (no await between the check and the claim). */
+function claimCreateSend(key: string): CreateSendRecord | undefined {
+  const prior = recentCreateSend(key);
+  if (prior) return prior;
+  while (CREATE_SEND_RECENT.size >= CREATE_SEND_RECENT_MAX) CREATE_SEND_RECENT.delete(CREATE_SEND_RECENT.keys().next().value!);
+  CREATE_SEND_RECENT.set(key, { at: createSendNow(), outcome: "possibly_sent", conversationId: null, url: null });
+  return undefined;
+}
+
+function conversationUrl(port: FreeScoutPort, id: number): string | null {
+  return port.baseUrl ? new URL(`conversation/${id}`, port.baseUrl).href : null;
+}
+
+/**
  * Create a new outbound email conversation. Refuses before any request: invalid addresses (each must be one bare
  * lowercase address), an address twice, more than MAX_CREATE_CC cc+bcc, an empty/overlong subject or one with control
  * characters, assignee or tags in draft mode, send=true while the gate is off or outside FREESCOUT_REPLY_MAILBOXES.
@@ -2828,6 +2893,12 @@ async function createConversationUnlocked(
 
   if (!send) return createDraft(port, { mailboxId, to, cc, bcc, subject, body, status }, plan.status !== undefined);
 
+  // A send that went out (or may have) recently is not repeated: checked here before any further request (the Tags
+  // check below is a POST), and again atomically right before the send POST.
+  const sendKey = createSendKey(port, f.current_user_id, mailboxId, to, subject);
+  const prior = recentCreateSend(sendKey);
+  if (prior) throw refuse(recentSendRefusal(prior, to, mailboxId));
+
   // The after-send checks read translated markup (conv-type-{{ __('Email') }}, "To:"/"Cc:"/"Bcc:" labels). On another
   // language they would fail only AFTER the email is out, so send mode needs an English UI up front (fails closed).
   if (f.anyone_label !== "Anyone") {
@@ -2859,7 +2930,7 @@ async function createConversationUnlocked(
       throw refuse(`tags were requested but the Tags module does not answer (${(e as Error).message}); create it without tags`);
     }
   }
-  return createAndSend(port, { mailboxId, to, cc, bcc, subject, body, status, userId, tags: plan.tags }, gate);
+  return createAndSend(port, { mailboxId, to, cc, bcc, subject, body, status, userId, tags: plan.tags }, gate, sendKey, refuse);
 }
 
 /** Error raised after the draft POST was dispatched without proof FreeScout refused it. Drafts never email anyone. */
@@ -2966,11 +3037,21 @@ async function createAndSend(
   port: FreeScoutPort,
   p: { mailboxId: number; to: string; cc: string[]; bcc: string[]; subject: string; body: string; status: number; userId: number; tags: string[] },
   gate: CreateGate,
+  sendKey: string,
+  refuse: (why: string) => FreeScoutError,
 ): Promise<CreateConversationResult> {
   const form = buildCreateSendForm({ mailbox_id: p.mailboxId, to: p.to, cc: p.cc, bcc: p.bcc, subject: p.subject, body: p.body, status: p.status, user_id: p.userId });
   // Re-checked at the last moment: the send form is only ever posted with the gate on for this mailbox.
   if (!createSendAllowed(gate.reply, gate.createSend, p.mailboxId)) throw new FreeScoutError("create_conversation: send mode is disabled; nothing was sent");
   assertCreateForm(form, "send");
+  // Recorded as possibly_sent BEFORE the POST, so every outcome but a proven refusal blocks an identical retry.
+  const prior = claimCreateSend(sendKey);
+  if (prior) throw refuse(recentSendRefusal(prior, p.to, p.mailboxId));
+  const record = CREATE_SEND_RECENT.get(sendKey)!;
+  const notSent = (e: unknown) => {
+    if (CREATE_SEND_RECENT.get(sendKey) === record) CREATE_SEND_RECENT.delete(sendKey);
+    return e;
+  };
   // From here on the POST may have been processed. A failure without proof that FreeScout refused it must not read as
   // "not sent", or the caller retries and the recipients get a second email.
   let res: AjaxEnvelope & { redirect_url?: unknown };
@@ -2978,15 +3059,15 @@ async function createAndSend(
     res = await port.ajaxPost<typeof res>(AJAX, form);
   } catch (e) {
     // 403 (PermissionError) and logged-out (AuthError) answers come from middleware before the controller runs.
-    if (e instanceof PermissionError || e instanceof AuthError) throw e;
+    if (e instanceof PermissionError || e instanceof AuthError) throw notSent(e);
     throw createPossiblySent(p.to, p.mailboxId, null, e);
   }
   try {
     checkAjax(res, "create_conversation");
   } catch (e) {
     // FreeScout's own {status:"error", msg} envelope (validation, "Incorrect recipients", permissions) comes before anything is saved.
-    if (e instanceof PermissionError) throw e;
-    if (isPlainObject(res) && res.status === "error" && typeof res.msg === "string" && res.msg.trim()) throw e;
+    if (e instanceof PermissionError) throw notSent(e);
+    if (isPlainObject(res) && res.status === "error" && typeof res.msg === "string" && res.msg.trim()) throw notSent(e);
     throw createPossiblySent(p.to, p.mailboxId, null, e);
   }
   // after_send=1 makes FreeScout answer with the new conversation's own URL (§5.7).
@@ -2995,6 +3076,8 @@ async function createAndSend(
   if (!isPosInt(cid)) {
     throw createPossiblySent(p.to, p.mailboxId, null, new Error(`FreeScout answered success but its redirect_url (${JSON.stringify(res.redirect_url)}) names no conversation`));
   }
+  record.conversationId = cid;
+  record.url = conversationUrl(port, cid);
 
   let after: { conv: ParsedConversation; page: HtmlPage };
   try {
@@ -3003,11 +3086,13 @@ async function createAndSend(
     throw createPossiblySent(p.to, p.mailboxId, cid, e);
   }
   const conv = after.conv;
-  const danger = (what: string) =>
-    new FreeScoutError(
+  const danger = (what: string) => {
+    record.outcome = "danger";
+    return new FreeScoutError(
       `DANGER: after create_conversation (conversation ${cid}), ${what}. The email was probably sent: do NOT retry. A human ` +
         "must check this conversation in FreeScout immediately (FreeScout sends about 15 seconds after the POST).",
     );
+  };
   if (conv.is_draft_conversation) throw danger("FreeScout shows it as an unsent draft, not a sent conversation");
   if (conv.mailbox_id !== p.mailboxId) throw danger(`it is in mailbox ${conv.mailbox_id}, not ${p.mailboxId}`);
   const listMailbox = after.page.$("#conv-list-col").filter((_, n) => !after.page.$(n).closest(".thread").length).first().attr("data-mailbox_id");
@@ -3025,6 +3110,7 @@ async function createAndSend(
   if (!sameEmail(conv.customer?.email, p.to)) throw danger(`its customer email is ${conv.customer?.email ?? "not shown"}, not ${p.to}`);
   if (squish(conv.subject ?? "") !== squish(p.subject)) throw danger(`its subject is ${JSON.stringify(conv.subject)}`);
 
+  record.outcome = "sent";
   const result: CreateConversationResult = {
     mode: "sent",
     sent: true,

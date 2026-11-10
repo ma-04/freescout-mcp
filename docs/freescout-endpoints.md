@@ -655,7 +655,9 @@ MCP uses the single POST for send mode.
   thread's To + CC + BCC minus the mailbox's own addresses, plus the mailbox's **Auto BCC** setting if any.
 - Undo: as for replies (§5.3), `undoReply()` turns a just-created conversation (thread `first`) back into a draft
   conversation (3469-3475) within 15 s, but only from the sending session's flash link. The MCP never calls it.
-- No duplicate check: two identical POSTs create two conversations and send two emails.
+- No duplicate check: two identical POSTs create two conversations and send two emails. The MCP therefore remembers
+  send-mode outcomes (sent, `POSSIBLY SENT`, `DANGER`) per FreeScout user + mailbox + `to` + normalised subject for 20
+  minutes in-process and refuses the same `send=true` call before any request (drafts are not affected).
 - Response: `{status:"success", msg:"", redirect_url}`, **no conversation id**. `getRedirectUrl()` (2859-2898): with
   `is_create` and `after_send` ≠ 1 it returns the **folder** URL (2869); with `after_send=1`
   (`MailboxUser::AFTER_SEND_STAY`) it returns `$conversation->url()` = `…/conversation/{id}?folder_id=N`. `after_send`
