@@ -9,9 +9,9 @@ import { checkAjax, type AjaxEnvelope } from "./ajax.js";
 import type { FreeScoutPort, HtmlPage } from "./client.js";
 import { AuthError, FreeScoutError, PermissionError } from "./errors.js";
 import { isStrictRecipient, recipientAllowed } from "./forward-allow.js";
-import { replyMailboxAllowed, type ReplyGate } from "./reply-gate.js";
+import { createSendAllowed, replyMailboxAllowed, type ReplyGate } from "./reply-gate.js";
 import { requireDate } from "./dates.js";
-import { parseConversation, STATUS_BY_VALUE, type ParsedConversation, type ParsedThread } from "./parsers/conversation.js";
+import { parseConversation, parseCreateForm, STATUS_BY_VALUE, threadBcc, type CreateFormPage, type ParsedConversation, type ParsedThread } from "./parsers/conversation.js";
 import { parseConversationTable, type ConversationRow, type ConversationTable } from "./parsers/conversation-table.js";
 import { parseCustomerEdit, parseCustomerSearch, parseCustomerSnippet, type CustomerProfile } from "./parsers/customer.js";
 import {
@@ -2457,6 +2457,692 @@ async function sendReplyUnlocked(port: FreeScoutPort, conversationId: number, op
         "The reply carried the status and assignee read beforehand, which FreeScout applies as sent, so their change was " +
         `probably reverted. Ask the human to re-check the status and assignee of conversation ${conversationId} in FreeScout.`,
     );
+  }
+  if (warnings.length) result.warning = warnings.join(" ");
+  return result;
+}
+
+// ---------------------------------------------------------------------------------------------
+// create_conversation (§5.7): a NEW outbound email conversation. Two pinned forms, both with is_create=1 and neither
+// with conversation_id/thread_id (so they can only create, never edit or publish an existing draft):
+// - draft (default, ungated): save_draft + is_create creates a draft conversation (state 1); nothing is emailed.
+// - send (send=true): send_reply + is_create creates and publishes it; FreeScout emails to/cc/bcc after its 15 s undo
+//   window. Only when the operator set FREESCOUT_REPLY_ENABLED=1 AND FREESCOUT_CREATE_SEND=1 (and the mailbox is in
+//   FREESCOUT_REPLY_MAILBOXES when that is set). send=true with the gate off is refused, never downgraded to a draft.
+
+/** Most cc+bcc addresses one call may add. */
+export const MAX_CREATE_CC = 10;
+/** FreeScout's `subject` validation (`required|string|max:998`). */
+export const CREATE_SUBJECT_MAX = 998;
+
+export type CreateAssignee = "me" | "unassigned" | number;
+
+export interface CreateConversationInput {
+  mailbox_id: number;
+  to: string;
+  subject: string;
+  body: string;
+  cc?: string[];
+  bcc?: string[];
+  /** Send mode only (a draft conversation is never assigned: save_draft ignores user_id). */
+  assignee?: CreateAssignee;
+  status?: ReplyStatus;
+  /** Send mode only (applied after creation through add_tag's path; add_tag refuses draft conversations). */
+  tags?: string[];
+  send?: boolean;
+}
+
+/** Server-side switches (environment only). `createSend` already requires `reply.enabled`; checked again here. */
+export interface CreateGate {
+  reply: ReplyGate;
+  createSend: boolean;
+}
+
+type Recipients = [string];
+
+/** The draft form: exactly these keys (cc/bcc only when non-empty). */
+export type CreateDraftForm = {
+  action: "save_draft";
+  mailbox_id: string;
+  is_create: "1";
+  type: "1";
+  to: Recipients;
+  cc?: string[];
+  bcc?: string[];
+  subject: string;
+  body: string;
+  status: string;
+};
+
+/** The send form: the draft keys with action send_reply, plus user_id and after_send=1 (the redirect carries the id). */
+export type CreateSendForm = Omit<CreateDraftForm, "action"> & {
+  action: "send_reply";
+  user_id: string;
+  after_send: "1";
+};
+
+const CREATE_BASE_KEYS = ["action", "body", "is_create", "mailbox_id", "status", "subject", "to", "type"];
+const CREATE_OPTIONAL_KEYS = ["bcc", "cc"];
+const CREATE_SEND_KEYS = ["after_send", "user_id"];
+/** Named so the refusal says what was smuggled; any other unknown key is refused too. */
+const CREATE_FORBIDDEN_KEYS = [
+  "conversation_id", "thread_id", "is_note", "subtype", "multiple_conversations", "to_email", "to_email[]", "to[]",
+  "cc[]", "bcc[]", "from_alias", "attachments", "attachments[]", "attachments_all", "embeds", "conv_history",
+  "customer_id", "name", "phone", "is_phone", "saved_reply_id",
+];
+
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
+
+/**
+ * Hard guard run right before the create POST. Exact key set per mode; `type` pinned to 1 (email), `is_create` to 1,
+ * `to` exactly one strict address, cc/bcc strict addresses (at most MAX_CREATE_CC together, no address twice anywhere),
+ * no conversation_id/thread_id (which would edit or publish an existing draft), no multiple_conversations (one
+ * conversation and email per address), no note/forward/alias/attachment keys. Draft mode has no user_id/after_send.
+ */
+export function assertCreateForm(form: unknown, mode: "draft" | "send"): asserts form is CreateDraftForm | CreateSendForm {
+  if (!isPlainObject(form)) throw new FreeScoutError("Refusing to send create form (not a plain object)");
+  const problems: string[] = [];
+  const keys = Object.keys(form);
+  const required = mode === "send" ? [...CREATE_BASE_KEYS, ...CREATE_SEND_KEYS] : CREATE_BASE_KEYS;
+  for (const k of keys) {
+    if (CREATE_FORBIDDEN_KEYS.includes(k) || (mode === "draft" && CREATE_SEND_KEYS.includes(k))) problems.push(`forbidden field ${k}`);
+    else if (!required.includes(k) && !CREATE_OPTIONAL_KEYS.includes(k)) problems.push(`unexpected field ${k}`);
+  }
+  for (const k of required) if (!keys.includes(k)) problems.push(`${k} missing`);
+  for (const k of keys) if (!["to", "cc", "bcc"].includes(k) && typeof form[k] !== "string") problems.push(`${k} is not a string`);
+  if (form.action !== (mode === "send" ? "send_reply" : "save_draft")) problems.push(`action is not ${mode === "send" ? "send_reply" : "save_draft"}`);
+  if (form.is_create !== "1") problems.push("is_create is not '1'");
+  if (form.type !== "1") problems.push("type is not '1' (email)");
+  if (typeof form.mailbox_id !== "string" || !/^[1-9]\d*$/.test(form.mailbox_id)) problems.push("mailbox_id is not a single positive integer string");
+  if (typeof form.status !== "string" || !/^[123]$/.test(form.status)) problems.push("status is not 1, 2 or 3");
+  if (mode === "send") {
+    if (typeof form.user_id !== "string" || !/^(-1|[1-9]\d*)$/.test(form.user_id)) problems.push("user_id is not a positive integer or -1");
+    if (form.after_send !== "1") problems.push("after_send is not '1'");
+  }
+  const subject = form.subject;
+  if (typeof subject !== "string" || !subject.trim()) problems.push("subject is empty");
+  else {
+    if (subject.length > CREATE_SUBJECT_MAX) problems.push(`subject is longer than ${CREATE_SUBJECT_MAX} characters`);
+    if (CONTROL_CHARS.test(subject)) problems.push("subject contains control characters");
+  }
+  if (typeof form.body !== "string" || !form.body.trim()) problems.push("body is empty");
+  const all: string[] = [];
+  const list = (k: "to" | "cc" | "bcc", min: number, max: number) => {
+    if (!(k in form)) return;
+    const v = form[k];
+    if (!Array.isArray(v)) return void problems.push(`${k} is not an array`);
+    if (v.length < min || v.length > max) problems.push(`${k} must have ${min === max ? min : `${min}..${max}`} address${max === 1 ? "" : "es"} (has ${v.length})`);
+    for (const e of v) {
+      if (!isStrictRecipient(e)) problems.push(`${k} entry ${JSON.stringify(e)} is not a single bare lowercase address`);
+      else all.push(e);
+    }
+  };
+  list("to", 1, 1);
+  list("cc", 1, MAX_CREATE_CC);
+  list("bcc", 1, MAX_CREATE_CC);
+  const ccCount = all.length - (Array.isArray(form.to) ? form.to.length : 0);
+  if (ccCount > MAX_CREATE_CC) problems.push(`cc and bcc together have ${ccCount} addresses (max ${MAX_CREATE_CC})`);
+  if (new Set(all).size !== all.length) problems.push("an address appears more than once in to/cc/bcc");
+  if (problems.length) throw new FreeScoutError(`Refusing to send create form (${problems.join(", ")})`);
+}
+
+interface CreateFormInput {
+  mailbox_id: number;
+  to: string;
+  cc: string[];
+  bcc: string[];
+  subject: string;
+  body: string;
+  status: number;
+}
+
+export function buildCreateDraftForm(input: CreateFormInput): CreateDraftForm {
+  const form: CreateDraftForm = {
+    action: "save_draft",
+    mailbox_id: String(input.mailbox_id),
+    is_create: "1",
+    type: "1",
+    to: [input.to],
+    subject: input.subject,
+    body: input.body,
+    status: String(input.status),
+  };
+  if (input.cc.length) form.cc = [...input.cc];
+  if (input.bcc.length) form.bcc = [...input.bcc];
+  assertCreateForm(form, "draft");
+  return form;
+}
+
+export function buildCreateSendForm(input: CreateFormInput & { user_id: number }): CreateSendForm {
+  const form: CreateSendForm = {
+    action: "send_reply",
+    mailbox_id: String(input.mailbox_id),
+    is_create: "1",
+    type: "1",
+    to: [input.to],
+    subject: input.subject,
+    body: input.body,
+    status: String(input.status),
+    user_id: String(input.user_id),
+    after_send: "1",
+  };
+  if (input.cc.length) form.cc = [...input.cc];
+  if (input.bcc.length) form.bcc = [...input.bcc];
+  assertCreateForm(form, "send");
+  return form;
+}
+
+export interface CreateConversationResult {
+  /** "draft": a draft conversation, nothing emailed. "sent": created and handed to FreeScout's mailer. */
+  mode: "draft" | "sent";
+  sent: boolean;
+  conversation_id: number;
+  number: number | null;
+  thread_id: number;
+  mailbox_id: number;
+  to: string;
+  cc: string[];
+  bcc: string[];
+  subject: string;
+  status: string | null;
+  /** Send mode: the assignee as the re-read page shows it (null = unassigned). */
+  assignee?: string | null;
+  /** Send mode, when tags were requested: add_tag's result, or the reason it failed (the conversation exists and was sent either way). */
+  tags?: TagResult;
+  tags_error?: string;
+  undo_note?: string;
+  note?: string;
+  warning?: string;
+}
+
+export const CREATE_DRAFT_NOTE =
+  "Nothing was emailed. A human opens this draft in FreeScout (mailbox Drafts folder), reviews it and clicks Send; " +
+  "status and assignee are chosen in that form then (FreeScout preselects them from the mailbox settings). This " +
+  "server cannot send or delete a draft conversation (discard_draft and send_reply refuse it); discard it in the UI if unwanted.";
+
+export const CREATE_UNDO_NOTE =
+  "FreeScout queues the email for about 15 seconds before sending. Its Undo link is shown only to the session that " +
+  "created the conversation (this server's), not in a human's browser, so treat it as sent; it cannot be taken back.";
+
+const sameSet = (a: readonly string[], b: readonly string[]) => {
+  const x = [...new Set(a.map((e) => e.trim().toLowerCase()))].sort();
+  const y = [...new Set(b.map((e) => e.trim().toLowerCase()))].sort();
+  return x.length === y.length && x.every((e, i) => e === y[i]) && a.length === b.length;
+};
+
+/** Normalise and check one optional address list: strict addresses, de-duplicated (silently) within the list. */
+function recipientList(raw: unknown, name: string): string[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) throw new FreeScoutError(`${name} must be a list of email addresses`);
+  const out: string[] = [];
+  for (const r of raw) {
+    let e: string;
+    try {
+      e = normalizeRecipient(String(r ?? ""));
+    } catch (err) {
+      throw new FreeScoutError(`${name}: ${(err as Error).message} (${JSON.stringify(r)}). Nothing was created.`);
+    }
+    if (!out.includes(e)) out.push(e);
+  }
+  return out;
+}
+
+/**
+ * Conversations being created in this process (all sessions), keyed by mailbox + recipient + subject: two overlapping
+ * identical calls would create two conversations (and in send mode send two emails); FreeScout has no duplicate check.
+ */
+const CREATE_IN_FLIGHT = new Set<string>();
+
+/**
+ * Recent send-mode outcomes in this process (all sessions), so a retry after a send that went out (or may have) is
+ * refused instead of emailing the recipient again: FreeScout has no duplicate check. Keyed by FreeScout instance +
+ * logged-in user id + mailbox + `to` + normalised subject. An entry is set (as possibly_sent) right before the POST,
+ * dropped only when FreeScout provably refused it, and upgraded to sent/danger afterwards. Draft mode never uses it.
+ */
+export const CREATE_SEND_RECENT_MS = 20 * 60 * 1000;
+const CREATE_SEND_RECENT_MAX = 500;
+type CreateSendOutcome = "sent" | "possibly_sent" | "danger";
+interface CreateSendRecord {
+  at: number;
+  outcome: CreateSendOutcome;
+  conversationId: number | null;
+  url: string | null;
+}
+const CREATE_SEND_RECENT = new Map<string, CreateSendRecord>();
+let createSendNow: () => number = () => Date.now();
+
+/** Tests only: forget every recorded send and optionally replace the clock (undefined = Date.now). */
+export function resetCreateSendHistoryForTests(now?: () => number): void {
+  CREATE_SEND_RECENT.clear();
+  createSendNow = now ?? (() => Date.now());
+}
+
+const normalizeCreateSubject = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
+
+function createSendKey(port: FreeScoutPort, userId: number | null, mailboxId: number, to: string, subject: string): string {
+  // An unknown user id shares one bucket: over-blocks rather than letting a duplicate through.
+  return [port.baseUrl?.href ?? "", userId ?? "?", mailboxId, to.trim().toLowerCase(), normalizeCreateSubject(subject)].join("\n");
+}
+
+function recentCreateSend(key: string): CreateSendRecord | undefined {
+  const now = createSendNow();
+  for (const [k, r] of CREATE_SEND_RECENT) if (now - r.at >= CREATE_SEND_RECENT_MS) CREATE_SEND_RECENT.delete(k);
+  return CREATE_SEND_RECENT.get(key);
+}
+
+function recentSendRefusal(r: CreateSendRecord, to: string, mailboxId: number): string {
+  const mins = Math.max(0, Math.round((createSendNow() - r.at) / 60000));
+  const what =
+    r.outcome === "sent" ? "sent" : r.outcome === "danger" ? "ended in DANGER (probably sent)" : "ended in POSSIBLY SENT (it may have been sent)";
+  const where =
+    r.conversationId !== null
+      ? `conversation ${r.conversationId}${r.url ? ` (${r.url})` : ""}`
+      : `mailbox ${mailboxId} (look for the subject; the earlier call did not learn the new id)`;
+  return (
+    `an identical create_conversation (same agent, mailbox ${mailboxId}, to ${to}, subject) with send=true ${what} about ${mins} ` +
+    `minute(s) ago. FreeScout has no duplicate check, so the recipient would get it twice. Check ${where} in FreeScout instead ` +
+    `of retrying; this server refuses the same send for ${CREATE_SEND_RECENT_MS / 60000} minutes. This call did nothing`
+  );
+}
+
+/** Synchronous check-and-claim right before the send POST (no await between the check and the claim). */
+function claimCreateSend(key: string): CreateSendRecord | undefined {
+  const prior = recentCreateSend(key);
+  if (prior) return prior;
+  while (CREATE_SEND_RECENT.size >= CREATE_SEND_RECENT_MAX) CREATE_SEND_RECENT.delete(CREATE_SEND_RECENT.keys().next().value!);
+  CREATE_SEND_RECENT.set(key, { at: createSendNow(), outcome: "possibly_sent", conversationId: null, url: null });
+  return undefined;
+}
+
+function conversationUrl(port: FreeScoutPort, id: number): string | null {
+  return port.baseUrl ? new URL(`conversation/${id}`, port.baseUrl).href : null;
+}
+
+/**
+ * Create a new outbound email conversation. Refuses before any request: invalid addresses (each must be one bare
+ * lowercase address), an address twice, more than MAX_CREATE_CC cc+bcc, an empty/overlong subject or one with control
+ * characters, assignee or tags in draft mode, send=true while the gate is off or outside FREESCOUT_REPLY_MAILBOXES.
+ * Before the POST: the mailbox must be on the dashboard list and its New Conversation page must open (FreeScout's own
+ * permission check), and the assignee must be one that page offers. Then one pinned POST; afterwards the created
+ * conversation is re-read and checked (mailbox, draft/published state, the one thread, recipients, subject).
+ */
+export async function createConversation(port: FreeScoutPort, input: CreateConversationInput, gate: CreateGate): Promise<CreateConversationResult> {
+  const send = input.send === true;
+  if (input.send !== undefined && typeof input.send !== "boolean") throw new FreeScoutError("send must be true or false");
+  const mailboxId = input.mailbox_id;
+  if (!isPosInt(mailboxId)) throw new FreeScoutError("mailbox_id must be a positive integer");
+  const refuse = (why: string) => new FreeScoutError(`Refusing to create the conversation: ${why}. Nothing was created${send ? " or sent" : ""}.`);
+
+  // Mode and gate first: a refused send never causes a single request, and is never turned into a draft.
+  if (send) {
+    if (!gate.reply.enabled || gate.createSend !== true) {
+      throw refuse(
+        "sending new conversations is disabled on this server (it needs FREESCOUT_REPLY_ENABLED=1 and FREESCOUT_CREATE_SEND=1, " +
+          "set by the server operator). Use send=false to create a draft a human can review and send, if the human wants that",
+      );
+    }
+    if (!createSendAllowed(gate.reply, gate.createSend, mailboxId)) {
+      throw refuse(
+        `mailbox ${mailboxId} is not in this server's FREESCOUT_REPLY_MAILBOXES (${gate.reply.mailboxes.join(", ")}). Only the ` +
+          "server operator can change that list; do not look for a way around it",
+      );
+    }
+  } else {
+    if (input.assignee !== undefined) {
+      throw refuse("assignee only works with send=true: FreeScout never stores an assignee on a draft conversation (the human picks one when sending it)");
+    }
+    if (input.tags !== undefined && input.tags.length) {
+      throw refuse("tags only work with send=true: tags cannot be added to an unsent draft conversation (add them after it is sent)");
+    }
+  }
+
+  let to: string;
+  try {
+    to = normalizeRecipient(input.to);
+  } catch (e) {
+    throw refuse(`to: ${(e as Error).message}`);
+  }
+  const cc = recipientList(input.cc, "cc");
+  const bcc = recipientList(input.bcc, "bcc");
+  if (cc.includes(to) || bcc.includes(to)) throw refuse(`${to} is the To address; do not repeat it in cc/bcc`);
+  const both = cc.filter((e) => bcc.includes(e));
+  if (both.length) throw refuse(`${both.join(", ")} is in both cc and bcc`);
+  if (cc.length + bcc.length > MAX_CREATE_CC) throw refuse(`cc and bcc together have ${cc.length + bcc.length} addresses (max ${MAX_CREATE_CC})`);
+  const subject = typeof input.subject === "string" ? input.subject.trim() : "";
+  if (!subject) throw refuse("subject is empty");
+  if (subject.length > CREATE_SUBJECT_MAX) throw refuse(`subject is longer than ${CREATE_SUBJECT_MAX} characters`);
+  if (CONTROL_CHARS.test(subject)) throw refuse("subject contains line breaks or control characters");
+  if (input.status !== undefined && !Object.prototype.hasOwnProperty.call(REPLY_STATUSES, input.status)) {
+    throw refuse("status must be active, pending or closed");
+  }
+  const assignee = input.assignee;
+  if (assignee !== undefined && assignee !== "me" && assignee !== "unassigned" && !isPosInt(assignee)) {
+    throw refuse('assignee must be "me", "unassigned" or a user id');
+  }
+  const tags: string[] = [];
+  for (const raw of input.tags ?? []) {
+    const name = typeof raw === "string" ? raw.trim() : raw;
+    const p = tagNameProblems(name);
+    if (p.length) throw refuse(`invalid tag: ${p.join(", ")}`);
+    if (!tags.some((t) => tagKey(t) === tagKey(name as string))) tags.push(name as string);
+  }
+  if (tags.length > MAX_TAGS_PER_CALL) throw refuse(`at most ${MAX_TAGS_PER_CALL} tags`);
+  const body = formatBody(input.body);
+
+  const key = `${mailboxId}\n${to}\n${subject.toLowerCase()}`;
+  if (CREATE_IN_FLIGHT.has(key)) {
+    throw refuse(
+      `another create_conversation to ${to} with this subject in mailbox ${mailboxId} is in progress. Wait for that call's ` +
+        "result and do not create it again unless the human asks",
+    );
+  }
+  CREATE_IN_FLIGHT.add(key);
+  try {
+    return await createConversationUnlocked(port, { mailboxId, to, cc, bcc, subject, body, status: input.status, assignee, tags, send }, gate, refuse);
+  } finally {
+    CREATE_IN_FLIGHT.delete(key);
+  }
+}
+
+interface CreatePlan {
+  mailboxId: number;
+  to: string;
+  cc: string[];
+  bcc: string[];
+  subject: string;
+  body: string;
+  status?: ReplyStatus;
+  assignee?: CreateAssignee;
+  tags: string[];
+  send: boolean;
+}
+
+async function createConversationUnlocked(
+  port: FreeScoutPort,
+  plan: CreatePlan,
+  gate: CreateGate,
+  refuse: (why: string) => FreeScoutError,
+): Promise<CreateConversationResult> {
+  const { mailboxId, to, cc, bcc, subject, body, send } = plan;
+
+  // The mailbox must be one this account can use: on the dashboard, and FreeScout's New Conversation page for it opens
+  // (create() authorizes view on the mailbox; 403 otherwise). That page also carries the assignee list and a fresh CSRF token.
+  const boxes = await listMailboxes(port, false);
+  if (!boxes.some((b) => b.id === mailboxId)) {
+    throw refuse(`mailbox ${mailboxId} is not one of the mailboxes this account can access (${boxes.map((b) => b.id).join(", ") || "none listed"}; see list_mailboxes)`);
+  }
+  const page = await port.getHtml(`/mailbox/${mailboxId}/new-ticket`);
+  if (!new RegExp(`/mailbox/${mailboxId}/new-ticket/?$`).test(new URL(page.url).pathname)) {
+    throw refuse(`FreeScout did not open the New Conversation page of mailbox ${mailboxId} (ended at ${new URL(page.url).pathname})`);
+  }
+  const f = parseCreateForm(page.$);
+  if (!f.present) throw refuse("the New Conversation page has no create form (unexpected FreeScout markup)");
+  if (f.mailbox_id !== mailboxId || (f.body_mailbox_id !== null && f.body_mailbox_id !== mailboxId)) {
+    throw refuse(`the New Conversation page shows mailbox ${f.mailbox_id ?? "?"}/${f.body_mailbox_id ?? "?"}, not ${mailboxId}`);
+  }
+  if (f.conversation_id !== null || f.thread_id !== null) {
+    throw refuse("the New Conversation page is pre-filled with an existing conversation or draft (unexpected FreeScout markup)");
+  }
+
+  // Status: requested, else what FreeScout's form preselects for this mailbox (first option when nothing is).
+  const status = plan.status !== undefined ? REPLY_STATUSES[plan.status] : (f.status_selected ?? f.status_options[0] ?? 1);
+  if (![1, 2, 3].includes(status) || (f.status_options.length && !f.status_options.includes(status))) {
+    throw refuse(`status ${status} is not offered by FreeScout's New Conversation form (${f.status_options.join(", ")})`);
+  }
+
+  if (!send) return createDraft(port, { mailboxId, to, cc, bcc, subject, body, status }, plan.status !== undefined);
+
+  // A send that went out (or may have) recently is not repeated: checked here before any further request (the Tags
+  // check below is a POST), and again atomically right before the send POST.
+  const sendKey = createSendKey(port, f.current_user_id, mailboxId, to, subject);
+  const prior = recentCreateSend(sendKey);
+  if (prior) throw refuse(recentSendRefusal(prior, to, mailboxId));
+
+  // The after-send checks read translated markup (conv-type-{{ __('Email') }}, "To:"/"Cc:"/"Bcc:" labels). On another
+  // language they would fail only AFTER the email is out, so send mode needs an English UI up front (fails closed).
+  if (f.anyone_label !== "Anyone") {
+    throw refuse(
+      `send mode needs an English FreeScout UI (the New Conversation form's "Anyone" option reads ${JSON.stringify(f.anyone_label)}), ` +
+        "because the checks after sending read FreeScout's English labels. Create a draft (send=false) instead",
+    );
+  }
+  // Assignee: one FreeScout offers on this mailbox's form (-1 Anyone, the logged-in user, usersAssignable()). FreeScout
+  // silently leaves the conversation unassigned for anyone else, so the list is checked here and the result re-read.
+  if (!f.user_options.length) throw refuse("the New Conversation page offers no assignee list (unexpected FreeScout markup)");
+  let userId: number;
+  if (plan.assignee === undefined) userId = f.user_selected ?? -1;
+  else if (plan.assignee === "unassigned") userId = -1;
+  else if (plan.assignee === "me") {
+    if (f.current_user_id === null) throw refuse("cannot tell the logged-in user's id from the page");
+    userId = f.current_user_id;
+  } else userId = plan.assignee;
+  if (!f.user_options.includes(userId)) {
+    throw refuse(`user ${userId} is not an assignee FreeScout offers in mailbox ${mailboxId} (offered: ${f.user_options.join(", ")}; -1 = unassigned)`);
+  }
+
+  // Tags are added after the email is out, so a missing Tags module must be found now, not then.
+  if (plan.tags.length) {
+    try {
+      await autocompleteTags(port, plan.tags[0]!);
+    } catch (e) {
+      if (e instanceof AuthError) throw e;
+      throw refuse(`tags were requested but the Tags module does not answer (${(e as Error).message}); create it without tags`);
+    }
+  }
+  return createAndSend(port, { mailboxId, to, cc, bcc, subject, body, status, userId, tags: plan.tags }, gate, sendKey, refuse);
+}
+
+/** Error raised after the draft POST was dispatched without proof FreeScout refused it. Drafts never email anyone. */
+function possiblyCreated(mailboxId: number, cause: unknown): FreeScoutError {
+  const msg = cause instanceof Error ? cause.message : String(cause);
+  return new FreeScoutError(
+    `POSSIBLY CREATED: a draft conversation may have been created in mailbox ${mailboxId} (nothing was emailed: drafts are ` +
+      `never sent). Do not retry blindly; ask the human to check that mailbox's Drafts folder first. (${msg})`,
+  );
+}
+
+async function createDraft(
+  port: FreeScoutPort,
+  p: { mailboxId: number; to: string; cc: string[]; bcc: string[]; subject: string; body: string; status: number },
+  statusRequested: boolean,
+): Promise<CreateConversationResult> {
+  const form = buildCreateDraftForm({ mailbox_id: p.mailboxId, to: p.to, cc: p.cc, bcc: p.bcc, subject: p.subject, body: p.body, status: p.status });
+  assertCreateForm(form, "draft");
+  let res: AjaxEnvelope & { conversation_id?: unknown; thread_id?: unknown; number?: unknown; customer_id?: unknown };
+  try {
+    res = await port.ajaxPost<typeof res>(AJAX, form);
+  } catch (e) {
+    if (e instanceof PermissionError || e instanceof AuthError) throw e;
+    throw possiblyCreated(p.mailboxId, e);
+  }
+  try {
+    checkAjax(res, "create_conversation (draft)");
+  } catch (e) {
+    if (e instanceof PermissionError) throw e;
+    if (isPlainObject(res) && res.status === "error" && typeof res.msg === "string" && res.msg.trim()) throw e;
+    throw possiblyCreated(p.mailboxId, e);
+  }
+  const cid = Number(res.conversation_id);
+  const tid = Number(res.thread_id);
+  if (!isPosInt(cid) || !isPosInt(tid)) {
+    throw possiblyCreated(p.mailboxId, new Error(`FreeScout answered success without conversation_id/thread_id (${JSON.stringify({ conversation_id: res.conversation_id, thread_id: res.thread_id })})`));
+  }
+
+  const fail = (what: string) =>
+    new FreeScoutError(
+      `create_conversation created draft conversation ${cid} (draft thread ${tid}, nothing was emailed) but ${what}. Do NOT ` +
+        `create it again; ask the human to check draft conversation ${cid} in FreeScout before anyone sends it, and discard it there if it is wrong.`,
+    );
+  let after: { conv: ParsedConversation; page: HtmlPage };
+  try {
+    after = await loadConversation(port, cid);
+  } catch (e) {
+    throw fail(`it could not be re-read (${(e as Error).message})`);
+  }
+  if (!after.conv.is_draft_conversation) {
+    throw new FreeScoutError(
+      `DANGER: create_conversation asked FreeScout for a DRAFT, but conversation ${cid} is not shown as an unsent draft ` +
+        "afterwards, so it may have been sent. Do NOT retry. A human must check this conversation in FreeScout immediately.",
+    );
+  }
+  const d = parseCreateForm(after.page.$);
+  if (!d.present) throw fail("its page shows no draft form");
+  if (d.conversation_id !== cid || d.thread_id !== tid) throw fail(`its page shows conversation ${d.conversation_id} / thread ${d.thread_id}`);
+  if (d.mailbox_id !== p.mailboxId || (d.body_mailbox_id !== null && d.body_mailbox_id !== p.mailboxId) || after.conv.mailbox_id !== p.mailboxId) {
+    throw fail(`it is in mailbox ${d.mailbox_id ?? after.conv.mailbox_id}, not ${p.mailboxId}`);
+  }
+  if (d.type !== 1) throw fail(`it is not an email conversation (type ${d.type})`);
+  if (!sameSet(d.to, [p.to])) throw fail(`it is addressed to ${d.to.join(", ") || "nobody"}, not ${p.to}`);
+  if (!sameSet(d.cc, p.cc)) throw fail(`its Cc is ${d.cc.join(", ") || "empty"}, not ${p.cc.join(", ") || "empty"}`);
+  if (!sameSet(d.bcc, p.bcc)) throw fail(`its Bcc is ${d.bcc.join(", ") || "empty"}, not ${p.bcc.join(", ") || "empty"}`);
+  if (squish(d.subject ?? "") !== squish(p.subject)) throw fail(`its subject is ${JSON.stringify(d.subject)}`);
+  if (d.body === null || squish(htmlToText(d.body)) !== squish(htmlToText(p.body))) throw fail("its text differs from what was posted");
+
+  const result: CreateConversationResult = {
+    mode: "draft",
+    sent: false,
+    conversation_id: cid,
+    number: isPosInt(res.number) ? res.number : after.conv.number,
+    thread_id: tid,
+    mailbox_id: p.mailboxId,
+    to: p.to,
+    cc: p.cc,
+    bcc: p.bcc,
+    subject: p.subject,
+    status: d.stored_status !== null ? (STATUS_BY_VALUE[d.stored_status] ?? null) : null,
+    note: CREATE_DRAFT_NOTE,
+  };
+  if (statusRequested && d.stored_status !== p.status) {
+    result.warning = `FreeScout stored status ${d.stored_status ?? "unknown"} on the draft, not ${p.status} as requested.`;
+  } else if (statusRequested && d.status_selected !== null && d.status_selected !== p.status) {
+    result.warning =
+      `The draft stores status ${STATUS_BY_VALUE[p.status]}, but FreeScout's Send form preselects ${STATUS_BY_VALUE[d.status_selected] ?? d.status_selected} ` +
+      "for this mailbox: the human must pick the status when sending.";
+  }
+  return result;
+}
+
+function createPossiblySent(to: string, mailboxId: number, conversationId: number | null, cause: unknown): FreeScoutError {
+  const msg = cause instanceof Error ? cause.message : String(cause);
+  const where = conversationId !== null ? `conversation ${conversationId}` : `mailbox ${mailboxId} (look for the subject; FreeScout did not say the new id)`;
+  return new FreeScoutError(
+    `${POSSIBLY_SENT} a new conversation to ${to} may already have been created and emailed. Do NOT retry ` +
+      `create_conversation (FreeScout has no duplicate check; the recipient would get it twice); ask the human to check ${where} ` +
+      `in FreeScout first. (${msg})`,
+  );
+}
+
+async function createAndSend(
+  port: FreeScoutPort,
+  p: { mailboxId: number; to: string; cc: string[]; bcc: string[]; subject: string; body: string; status: number; userId: number; tags: string[] },
+  gate: CreateGate,
+  sendKey: string,
+  refuse: (why: string) => FreeScoutError,
+): Promise<CreateConversationResult> {
+  const form = buildCreateSendForm({ mailbox_id: p.mailboxId, to: p.to, cc: p.cc, bcc: p.bcc, subject: p.subject, body: p.body, status: p.status, user_id: p.userId });
+  // Re-checked at the last moment: the send form is only ever posted with the gate on for this mailbox.
+  if (!createSendAllowed(gate.reply, gate.createSend, p.mailboxId)) throw new FreeScoutError("create_conversation: send mode is disabled; nothing was sent");
+  assertCreateForm(form, "send");
+  // Recorded as possibly_sent BEFORE the POST, so every outcome but a proven refusal blocks an identical retry.
+  const prior = claimCreateSend(sendKey);
+  if (prior) throw refuse(recentSendRefusal(prior, p.to, p.mailboxId));
+  const record = CREATE_SEND_RECENT.get(sendKey)!;
+  const notSent = (e: unknown) => {
+    if (CREATE_SEND_RECENT.get(sendKey) === record) CREATE_SEND_RECENT.delete(sendKey);
+    return e;
+  };
+  // From here on the POST may have been processed. A failure without proof that FreeScout refused it must not read as
+  // "not sent", or the caller retries and the recipients get a second email.
+  let res: AjaxEnvelope & { redirect_url?: unknown };
+  try {
+    res = await port.ajaxPost<typeof res>(AJAX, form);
+  } catch (e) {
+    // 403 (PermissionError) and logged-out (AuthError) answers come from middleware before the controller runs.
+    if (e instanceof PermissionError || e instanceof AuthError) throw notSent(e);
+    throw createPossiblySent(p.to, p.mailboxId, null, e);
+  }
+  try {
+    checkAjax(res, "create_conversation");
+  } catch (e) {
+    // FreeScout's own {status:"error", msg} envelope (validation, "Incorrect recipients", permissions) comes before anything is saved.
+    if (e instanceof PermissionError) throw notSent(e);
+    if (isPlainObject(res) && res.status === "error" && typeof res.msg === "string" && res.msg.trim()) throw notSent(e);
+    throw createPossiblySent(p.to, p.mailboxId, null, e);
+  }
+  // after_send=1 makes FreeScout answer with the new conversation's own URL (§5.7).
+  const m = typeof res.redirect_url === "string" ? /\/conversation\/(\d+)\/?(?:[?#]|$)/.exec(res.redirect_url) : null;
+  const cid = m ? Number(m[1]) : NaN;
+  if (!isPosInt(cid)) {
+    throw createPossiblySent(p.to, p.mailboxId, null, new Error(`FreeScout answered success but its redirect_url (${JSON.stringify(res.redirect_url)}) names no conversation`));
+  }
+  record.conversationId = cid;
+  record.url = conversationUrl(port, cid);
+
+  let after: { conv: ParsedConversation; page: HtmlPage };
+  try {
+    after = await loadConversation(port, cid);
+  } catch (e) {
+    throw createPossiblySent(p.to, p.mailboxId, cid, e);
+  }
+  const conv = after.conv;
+  const danger = (what: string) => {
+    record.outcome = "danger";
+    return new FreeScoutError(
+      `DANGER: after create_conversation (conversation ${cid}), ${what}. The email was probably sent: do NOT retry. A human ` +
+        "must check this conversation in FreeScout immediately (FreeScout sends about 15 seconds after the POST).",
+    );
+  };
+  if (conv.is_draft_conversation) throw danger("FreeScout shows it as an unsent draft, not a sent conversation");
+  if (conv.mailbox_id !== p.mailboxId) throw danger(`it is in mailbox ${conv.mailbox_id}, not ${p.mailboxId}`);
+  const listMailbox = after.page.$("#conv-list-col").filter((_, n) => !after.page.$(n).closest(".thread").length).first().attr("data-mailbox_id");
+  if (listMailbox !== undefined && listMailbox.trim() !== String(p.mailboxId)) throw danger(`the page shows mailbox ${JSON.stringify(listMailbox)} as well`);
+  if (conv.type !== "email") throw danger(`it is ${conv.type ? `a ${conv.type}` : "not an email"} conversation`);
+  const threads = conv.threads.filter((t) => t.type !== "lineitem" && t.type !== "customer");
+  if (threads.length !== 1) throw danger(`it has ${threads.length} agent threads (${threads.map((t) => `${t.thread_id}:${t.type}`).join(", ")}), expected exactly one message`);
+  const t = threads[0]!;
+  if (t.type !== "message" || t.thread_id === null) throw danger(`its thread is a ${t.type ?? "unknown"} thread, not a sent message`);
+  if (!t.author || t.author.kind !== "user" || !t.author.is_current_user) throw danger(`its message (thread ${t.thread_id}) is not shown as written by the logged-in user`);
+  if (!sameSet(t.to, [p.to])) throw danger(`its message is addressed to ${t.to.join(", ") || "nobody shown"}, not ${p.to}`);
+  if (!sameSet(t.cc, p.cc)) throw danger(`its Cc is ${t.cc.join(", ") || "empty"}, not ${p.cc.join(", ") || "empty"}`);
+  const shownBcc = threadBcc(after.page.$, t.thread_id) ?? [];
+  if (!sameSet(shownBcc, p.bcc)) throw danger(`its Bcc is ${shownBcc.join(", ") || "empty"}, not ${p.bcc.join(", ") || "empty"}`);
+  if (!sameEmail(conv.customer?.email, p.to)) throw danger(`its customer email is ${conv.customer?.email ?? "not shown"}, not ${p.to}`);
+  if (squish(conv.subject ?? "") !== squish(p.subject)) throw danger(`its subject is ${JSON.stringify(conv.subject)}`);
+
+  record.outcome = "sent";
+  const result: CreateConversationResult = {
+    mode: "sent",
+    sent: true,
+    conversation_id: cid,
+    number: conv.number,
+    thread_id: t.thread_id,
+    mailbox_id: p.mailboxId,
+    to: p.to,
+    cc: p.cc,
+    bcc: p.bcc,
+    subject: p.subject,
+    status: conv.status,
+    assignee: conv.assignee,
+    undo_note: CREATE_UNDO_NOTE,
+  };
+  // Not DANGER (the recipients are right), but FreeScout ignores an assignee it does not accept; tell the caller.
+  const warnings: string[] = [];
+  const changed: string[] = [];
+  if (conv.status_value !== p.status) changed.push(`status is ${conv.status ?? conv.status_value}, requested ${STATUS_BY_VALUE[p.status]}`);
+  if (conv.assignee_id !== p.userId) changed.push(`assignee id is ${conv.assignee_id}, requested ${p.userId}`);
+  if (changed.length) warnings.push(`The conversation was sent, but ${changed.join("; ")}. Ask the human to fix it in FreeScout; do not create it again.`);
+  // Tags come after the send. Their failure must not read as "nothing happened", or the caller would create (and send) it again.
+  if (p.tags.length) {
+    try {
+      result.tags = await addTag(port, cid, p.tags);
+    } catch (e) {
+      result.tags_error = e instanceof Error ? e.message : String(e);
+      warnings.push(
+        `Conversation ${cid} WAS created and sent, but adding the tags failed (${result.tags_error}). Do NOT create it again; ` +
+          `add the tags with add_tag on conversation ${cid}, or ask the human.`,
+      );
+    }
   }
   if (warnings.length) result.warning = warnings.join(" ");
   return result;

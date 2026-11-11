@@ -15,4 +15,9 @@ export interface ToolContext {
    * send_reply is registered only when `reply.enabled`; absent = disabled.
    */
   reply?: ReplyGate;
+  /**
+   * FREESCOUT_CREATE_SEND (server environment only), already combined with FREESCOUT_REPLY_ENABLED: create_conversation
+   * may send (send=true) only when this is true and `reply.enabled`. Absent = draft-only.
+   */
+  createSend?: boolean;
 }

@@ -42,6 +42,7 @@ describe("tool registry", () => {
         "agent_stats",
         "conversations_report",
         "close_conversation",
+        "create_conversation",
         "customer_history",
         "discard_draft",
         "get_conversation",

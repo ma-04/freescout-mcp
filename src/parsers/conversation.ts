@@ -276,3 +276,101 @@ function forwardInfo($: CheerioAPI, el: ReturnType<CheerioAPI>): Pick<ParsedThre
   });
   return child === undefined ? { is_forward: true } : { is_forward: true, forwarded_conversation_number: child };
 }
+
+/**
+ * Bcc addresses FreeScout prints in a thread's own header (thread.blade.php: `Bcc:` line inside .thread-recipients).
+ * Not part of ParsedThread (get_conversation's output is unchanged); create_conversation reads it to confirm the
+ * recipients of the conversation it created. Null when the thread is not on the page.
+ */
+export function threadBcc($: CheerioAPI, threadId: number): string[] | null {
+  const el = $("#conv-layout-main > div.thread")
+    .filter((_, n) => intOrNull($(n).attr("data-thread_id")) === threadId)
+    .first();
+  if (!el.length) return null;
+  const out: string[] = [];
+  el.find(".thread-recipients > div")
+    .filter((_, n) => !$(n).closest(".thread-body").length)
+    .each((_, d) => {
+      const m = /^Bcc:\s*(.+)$/i.exec(squish($(d).text()));
+      if (m) out.push(...m[1]!.split(/\s*,\s*/).filter(Boolean));
+    });
+  return out;
+}
+
+/**
+ * FreeScout's "New Conversation" form (create.blade.php + editor_bottom_toolbar.blade.php), rendered by
+ * `GET /mailbox/{id}/new-ticket` and by `GET /conversation/{id}` for an unsent draft conversation (state 1).
+ * Everything is read from FreeScout's own `form#form-create` and `#editor_bottom_toolbar`, never from thread HTML.
+ */
+export interface CreateFormPage {
+  /** form#form-create is present (with is_create=1). */
+  present: boolean;
+  /** Hidden inputs; null when empty (a new-ticket page has no conversation or thread yet). */
+  conversation_id: number | null;
+  thread_id: number | null;
+  mailbox_id: number | null;
+  /** body[data-mailbox_id] (printed by the toolbar partial). */
+  body_mailbox_id: number | null;
+  type: number | null;
+  /** Selected option values of to[] / cc[] / bcc[] (lowercased, trimmed). */
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  subject: string | null;
+  /** The textarea's raw text (the stored HTML of a draft). */
+  body: string | null;
+  /** select[name=status] option values and the preselected one (null = nothing preselected). */
+  status_options: number[];
+  status_selected: number | null;
+  /** select[name=status][data-note-status]: the stored status of a draft conversation. */
+  stored_status: number | null;
+  /** select[name=user_id] option values (-1 = Anyone) and the preselected one. */
+  user_options: number[];
+  user_selected: number | null;
+  /** Label of the `-1` assignee option: `__('Anyone')`, i.e. "Anyone" on an English UI. */
+  anyone_label: string | null;
+  current_user_id: number | null;
+}
+
+export function parseCreateForm($: CheerioAPI): CreateFormPage {
+  const form = $("form#form-create").first();
+  const input = (name: string) => intOrNull(form.find(`input[name="${name}"]`).first().attr("value"));
+  const selected = (name: string): string[] =>
+    form
+      .find(`select[name="${name}"] option`)
+      .toArray()
+      .filter((o) => $(o).attr("selected") !== undefined)
+      .map((o) => ($(o).attr("value") ?? "").trim().toLowerCase())
+      .filter(Boolean);
+  const toolbar = $("#editor_bottom_toolbar").first();
+  const options = (name: string) => toolbar.find(`select[name="${name}"] option`).toArray();
+  const ints = (els: ReturnType<typeof options>) => els.map((o) => intOrNull($(o).attr("value"))).filter((n): n is number => n !== null);
+  const pick = (els: ReturnType<typeof options>) => {
+    const s = els.find((o) => $(o).attr("selected") !== undefined);
+    return s ? intOrNull($(s).attr("value")) : null;
+  };
+  const textarea = form.find("textarea[name=body]").first();
+  return {
+    present: form.length > 0 && form.find('input[name="is_create"]').attr("value") === "1",
+    conversation_id: input("conversation_id"),
+    thread_id: input("thread_id"),
+    mailbox_id: input("mailbox_id"),
+    body_mailbox_id: intOrNull($("body").attr("data-mailbox_id")),
+    type: input("type"),
+    to: selected("to[]"),
+    cc: selected("cc[]"),
+    bcc: selected("bcc[]"),
+    subject: form.find("input[name=subject]").first().attr("value") ?? null,
+    body: textarea.length ? textarea.text() : null,
+    status_options: ints(options("status")),
+    status_selected: pick(options("status")),
+    stored_status: intOrNull(toolbar.find('select[name="status"]').first().attr("data-note-status")),
+    user_options: ints(options("user_id")),
+    user_selected: pick(options("user_id")),
+    anyone_label: (() => {
+      const o = options("user_id").find((x) => intOrNull($(x).attr("value")) === -1);
+      return o ? squish($(o).text()) : null;
+    })(),
+    current_user_id: intOrNull($("body").attr("data-auth_user_id")),
+  };
+}

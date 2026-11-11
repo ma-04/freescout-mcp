@@ -5,7 +5,7 @@ import { FreeScoutClient } from "./client.js";
 import { loadConfig } from "./config.js";
 import { describeForwarding } from "./forward-allow.js";
 import { addSecret, log, redact } from "./log.js";
-import { describeReply, REPLY_DISABLED } from "./reply-gate.js";
+import { describeCreate, describeReply, REPLY_DISABLED } from "./reply-gate.js";
 import { Session } from "./session.js";
 import { registerTools } from "./tools/index.js";
 import { VERSION } from "./version.js";
@@ -26,7 +26,9 @@ async function main(): Promise<void> {
 
   const server = new McpServer({ name: "freescout-mcp", version: VERSION });
   const reply = config.reply ?? REPLY_DISABLED;
-  registerTools(server, { client, forwardAllow: config.forwardAllow, statsDelayMs: config.statsDelayMs, reply });
+  // FREESCOUT_CREATE_SEND counts only together with FREESCOUT_REPLY_ENABLED (loadBaseConfig already enforces it).
+  const createSend = config.createSend === true && reply.enabled;
+  registerTools(server, { client, forwardAllow: config.forwardAllow, statsDelayMs: config.statsDelayMs, reply, createSend });
 
   await server.connect(new StdioServerTransport());
   log.info(
@@ -36,6 +38,7 @@ async function main(): Promise<void> {
   );
   log.info(describeForwarding(config.forwardAllow));
   log.info(describeReply(reply));
+  log.info(describeCreate(reply, createSend));
 }
 
 main().catch((e) => {

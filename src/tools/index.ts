@@ -5,6 +5,7 @@ import { registerAgentStats } from "./agent-stats.js";
 import { registerCloseConversation } from "./close-conversation.js";
 import type { ToolContext } from "./context.js";
 import { registerConversationsReport } from "./conversations-report.js";
+import { registerCreateConversation } from "./create-conversation.js";
 import { registerForwardConversation } from "./forward-conversation.js";
 import { registerGetConversation } from "./get-conversation.js";
 import { registerCustomerHistory } from "./customer-history.js";
@@ -35,6 +36,9 @@ import { registerWhoami } from "./whoami.js";
  * only when the operator set FREESCOUT_FORWARD_ALLOW, forward_conversation (one allow-listed, non-customer recipient; pinned
  * form) and, only when the operator set FREESCOUT_REPLY_ENABLED=1, send_reply (emails the conversation's customer alone:
  * a new reply or one of the agent's own drafts unchanged; optional FREESCOUT_REPLY_MAILBOXES; pinned form, no recipient fields).
+ * create_conversation is always registered: by default it creates a DRAFT conversation (save_draft + is_create, nothing
+ * emailed); it sends (send_reply + is_create, to/cc/bcc as given) only when ctx.createSend (FREESCOUT_CREATE_SEND=1 together
+ * with FREESCOUT_REPLY_ENABLED=1), otherwise send=true is refused. Both forms are pinned (assertCreateForm).
  * list_tags, list_assignees, ticket_volume, waiting_conversations, customer_history and list_report_users are read-only (GET only). productivity_report and
  * satisfaction_report, conversations_report and time_tracking_report are read-only but send one report request per call (agent_stats one per bucket, paced), POST /reports/ajax, that only computes a report (assertReportForm; the session layer may retry it once after a CSRF refresh or re-login). Without FREESCOUT_REPLY_ENABLED there is no customer reply/send tool; there is no assign tool, and no reopen tool beyond send_reply's optional status.
  */
@@ -63,6 +67,7 @@ const registrars: Array<(server: McpServer, ctx: ToolContext) => void> = [
   registerRemoveNote,
   registerSaveDraft,
   registerCloseConversation,
+  registerCreateConversation,
 ];
 
 export function registerTools(server: McpServer, ctx: ToolContext): void {

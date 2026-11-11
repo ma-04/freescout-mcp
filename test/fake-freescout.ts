@@ -64,8 +64,51 @@ export class FakeFreeScout {
    * recipient FreeScout uses (posted `to`, else the conversation's customer_email), the posted cc/bcc and body.
    */
   replies: Array<{ conversation_id: number; thread_id: number; to: string; cc: string[]; bcc: string[]; body: string; from_draft: boolean }> = [];
+  /**
+   * New conversations (send_reply / save_draft with is_create, docs/freescout-endpoints.md §5.7). `emails` records every
+   * email FreeScout would queue for a NEW or PUBLISHED-FROM-DRAFT conversation (to/cc/bcc as stored on the thread); any
+   * send_reply that reaches a draft conversation publishes it and is recorded here too, so a missing refusal shows up.
+   */
+  emails: Array<{ conversation_id: number; to: string[]; cc: string[]; bcc: string[]; body: string; via: "create" | "draft_publish" | "reply_on_draft" }> = [];
+  /** Draft conversations created through save_draft + is_create. */
+  createdDrafts: number[] = [];
+  /** Mailboxes whose New Conversation page this user may open (others: 403, like create()'s authorize). */
+  newTicketMailboxes: number[] = [1];
+  /** The New Conversation form's toolbar: assignable users (besides -1 and the logged-in user) and preselections. */
+  newTicket: { users?: Array<[number, string]>; statusSelected?: number | null; userSelected?: number | null; anyone?: string } = {};
+  /** Tags module on conversations created by send_reply + is_create: they get their own (empty) tag list and controls. */
+  tagNewConversations = false;
+  /** Users FreeScout accepts as assignee (Mailbox::userHasAccess); others are silently ignored (left unassigned). */
+  assignable: number[] = [7, 8];
+  private nextConvId = 300;
   /** Misbehaviour switches, to exercise the DANGER / post-verification checks. */
   misbehave: {
+    /** create (send): envelope answered instead of the normal one. status "error": nothing is created. */
+    createAnswer?: unknown;
+    /** create (send): record the conversation and email, then drop the connection. */
+    createDropsConnection?: boolean;
+    /** create (send): the stored thread shows these recipients instead. */
+    createShowsTo?: string[];
+    createShowsCc?: string[];
+    createShowsBcc?: string[];
+    /** create (send): the conversation lands in this mailbox. */
+    createMovesMailbox?: number;
+    /** create (send): stored as a draft conversation (nothing emailed) although send_reply answered success. */
+    createStaysDraft?: boolean;
+    /** create (send): a second message thread is stored as well. */
+    createAddsTwo?: boolean;
+    /** create (draft): the draft is stored published (and emailed) instead. */
+    draftPublishes?: boolean;
+    /** create (draft): the stored draft shows these To addresses instead. */
+    draftShowsTo?: string[];
+    /** create (draft): the stored draft keeps no status (shows this one). */
+    draftStoresStatus?: number;
+    /** create (draft): answer success without ids. */
+    draftNoIds?: boolean;
+    /** create (draft): envelope answered instead (status "error": nothing is created). */
+    draftAnswer?: unknown;
+    /** One-shot: the next conversation page GET after a create answers HTTP 502. */
+    rereadFailsAfterCreate?: boolean;
     statusAddsMessage?: boolean;
     forwardAddsMessage?: boolean;
     forwardReassigns?: number;
@@ -241,6 +284,14 @@ export class FakeFreeScout {
     this.tagPosts.push([...form.entries()]);
     // One conversation only: an array (bulk) or repeated conversation_id is refused.
     if (form.has("conversation_id[]") || form.getAll("conversation_id").length !== 1) return [400, { status: "error", msg: "bulk form" }];
+    const own = this.convs.get(Number(form.get("conversation_id")))?.tags;
+    if (own && form.get("conversation_id") !== "1") {
+      if (action === "add") {
+        for (const n of form.getAll("tag_names[]").map((x) => x.trim()).filter(Boolean)) if (!own.some((t) => t.toLowerCase() === n.toLowerCase())) own.push(n);
+        return [200, { status: "success", tags: own.map((name) => ({ name, url: tagUrl(this.base, name) })) }];
+      }
+      return [200, { status: "error", msg: "Unknown action" }];
+    }
     if (form.get("conversation_id") !== "1") return [200, { status: "error", msg: "Conversation not found" }];
     const norm = (n: string) => n.trim();
     const has = (n: string) => tags.some((t) => t.toLowerCase() === n.toLowerCase());
@@ -293,10 +344,13 @@ export class FakeFreeScout {
     const action = form.get("action");
     if (action === "delete_thread") return this.deleteThread(form);
     if (action === "load_draft") return this.loadDraft(form);
+    if ((action === "send_reply" || action === "save_draft") && form.get("is_create") && !form.get("conversation_id")) return this.createAjax(form);
+    if (action === "save_draft" && this.convs.get(Number(form.get("conversation_id")))?.draft) return this.draftConvAjax(form);
     if (action !== "conversation_change_status" && action !== "send_reply") return null;
     const id = Number(form.get("conversation_id"));
     const conv = this.convs.get(id);
     if (!conv) return null;
+    if (conv.draft && action === "send_reply") return this.draftConvAjax(form);
     this.convPosts.push([...form.entries()]);
     const teammate = this.misbehave.teammate;
     if (teammate) {
@@ -347,6 +401,86 @@ export class FakeFreeScout {
       conv.threads.push({ id: this.nextThreadId++, type: "message", body, to: [conv.customer_email] });
     }
     if (this.misbehave.forwardAnswer !== undefined) return [200, this.misbehave.forwardAnswer];
+    return [200, { status: "success", msg: "", redirect_url: `${this.base}/conversation/${id}` }];
+  }
+
+  /**
+   * send_reply / save_draft with is_create and no conversation_id (ConversationsController::ajax, FreeScout 1.8.248, §5.7):
+   * a new email conversation. save_draft: a draft conversation (state 1, no customer, status as posted, never assigned),
+   * answered with its ids. send_reply: validation (to/subject/body) answered as an error before anything is stored;
+   * otherwise a published conversation with one message thread, customer_email = to[0], status/assignee as posted
+   * (assignee only when "userHasAccess"), the email recorded in `emails`; redirect_url is the conversation only with
+   * after_send=1, else the folder.
+   */
+  private createAjax(form: URLSearchParams): [number, unknown] {
+    this.convPosts.push([...form.entries()]);
+    const m = this.misbehave;
+    const action = form.get("action");
+    const mailbox = Number(form.get("mailbox_id"));
+    if (!this.newTicketMailboxes.includes(mailbox)) return [200, { status: "error", msg: "Not enough permissions" }];
+    const to = form.getAll("to[]");
+    const cc = form.getAll("cc[]");
+    const bcc = form.getAll("bcc[]");
+    const subject = form.get("subject") ?? "";
+    const body = form.get("body") ?? "";
+    const status = Number(form.get("status") ?? 0);
+    const id = this.nextConvId++;
+    const threadId = this.nextThreadId++;
+    if (action === "save_draft") {
+      const da = m.draftAnswer as { status?: unknown } | undefined;
+      if (da && typeof da === "object" && da.status === "error") return [200, da];
+      if (m.draftPublishes) {
+        this.convs.set(id, { number: id, mailbox_id: mailbox, status: status || 1, assignee_id: -1, customer_email: to[0] ?? "", draft: false, subject, threads: [{ id: threadId, type: "message", body, to: to.slice(0, 1), cc, bcc }] });
+        this.emails.push({ conversation_id: id, to, cc, bcc, body, via: "create" });
+      } else {
+        this.convs.set(id, {
+          number: id, mailbox_id: mailbox, status: m.draftStoresStatus ?? status, assignee_id: -1, customer_email: "", draft: true, subject,
+          threads: [{ id: threadId, type: "draft", body, to: m.draftShowsTo ?? to, cc, bcc }],
+        });
+      }
+      this.createdDrafts.push(id);
+      if (m.draftNoIds) return [200, { status: "success", msg: "" }];
+      return [200, { status: "success", msg: "", conversation_id: id, customer_id: null, thread_id: threadId, number: id }];
+    }
+    const ans = m.createAnswer as { status?: unknown } | undefined;
+    if (ans && typeof ans === "object" && ans.status === "error") return [200, ans];
+    if (!to.length) return [200, { status: "error", msg: "The to field is required. " }];
+    if (!subject) return [200, { status: "error", msg: "The subject field is required. " }];
+    if (!body) return [200, { status: "error", msg: "The body field is required. " }];
+    const userId = Number(form.get("user_id") ?? 0);
+    const assignee = userId !== -1 && this.assignable.includes(userId) ? userId : -1;
+    const shown = { to: m.createShowsTo ?? to.slice(0, 1), cc: m.createShowsCc ?? cc, bcc: m.createShowsBcc ?? bcc };
+    const threads: FakeThread[] = [{ id: threadId, type: m.createStaysDraft ? "draft" : "message", body, by: this.postUserId, ...shown }];
+    if (m.createAddsTwo) threads.push({ id: this.nextThreadId++, type: "message", body, by: this.postUserId, ...shown });
+    this.convs.set(id, {
+      number: id, mailbox_id: m.createMovesMailbox ?? mailbox, status: status || 1, assignee_id: assignee, customer_email: to[0]!, draft: !!m.createStaysDraft, subject, threads,
+      ...(this.tagNewConversations ? { tags: [] } : {}),
+    });
+    if (!m.createStaysDraft) this.emails.push({ conversation_id: id, to: to.slice(0, 1), cc, bcc, body, via: "create" });
+    if (m.createAnswer !== undefined) return [200, m.createAnswer];
+    const redirect = form.get("after_send") === "1" ? `${this.base}/conversation/${id}?folder_id=1` : `${this.base}/mailbox/${mailbox}/1`;
+    return [200, { status: "success", msg: "", redirect_url: redirect }];
+  }
+
+  /**
+   * Any send_reply / save_draft that reaches an existing DRAFT conversation. FreeScout would edit the draft (save_draft)
+   * or publish it (send_reply: state -> published, with is_create the new-conversation email to the draft's
+   * recipients, otherwise a reply/note). Simulated loudly: every publish is recorded in `emails`, so a tool that forgot
+   * to refuse a draft conversation fails the invariant tests.
+   */
+  private draftConvAjax(form: URLSearchParams): [number, unknown] {
+    this.convPosts.push([...form.entries()]);
+    const id = Number(form.get("conversation_id"));
+    const conv = this.convs.get(id)!;
+    const draft = conv.threads.find((t) => t.type === "draft");
+    if (form.get("action") === "save_draft") {
+      if (draft) draft.body = form.get("body") ?? draft.body;
+      return [200, { status: "success", msg: "", conversation_id: id, thread_id: draft?.id, number: conv.number }];
+    }
+    conv.draft = false;
+    const to = form.getAll("to[]").length ? form.getAll("to[]") : (draft?.to ?? []);
+    if (draft) Object.assign(draft, { type: form.get("is_note") ? "note" : "message", body: form.get("body") ?? draft.body });
+    this.emails.push({ conversation_id: id, to, cc: draft?.cc ?? [], bcc: draft?.bcc ?? [], body: form.get("body") ?? "", via: form.get("is_create") ? "draft_publish" : "reply_on_draft" });
     return [200, { status: "success", msg: "", redirect_url: `${this.base}/conversation/${id}` }];
   }
 
@@ -571,6 +705,11 @@ export class FakeFreeScout {
           req.socket.destroy();
           return;
         }
+        if (sim && this.misbehave.createDropsConnection && form.get("is_create")) {
+          this.misbehave.createDropsConnection = false;
+          req.socket.destroy();
+          return;
+        }
         if (sim && this.misbehave.replyDropsConnection && form.get("action") === "send_reply" && !form.get("is_note") && !form.get("subtype")) {
           this.misbehave.replyDropsConnection = false;
           req.socket.destroy();
@@ -580,12 +719,22 @@ export class FakeFreeScout {
         return json(200, { status: "success", action: form.get("action") });
       }
       default: {
+        const nt = /^\/mailbox\/(\d+)\/new-ticket$/.exec(url.pathname);
+        if (nt && req.method === "GET") {
+          if (!sess.authed) return redirect("/login");
+          if (!this.newTicketMailboxes.includes(Number(nt[1]))) return send(403, "<h1>This action is unauthorized.</h1>");
+          return send(200, newTicketPage(this.base, sess.token, Number(nt[1]), sess.userId ?? 7, this.newTicket));
+        }
         const m = /^\/conversation\/(\d+)$/.exec(url.pathname);
         const conv = m && req.method === "GET" ? this.convs.get(Number(m[1])) : undefined;
         if (conv) {
           if (!sess.authed) return redirect("/login");
           if (this.misbehave.rereadFailsAfterForward && this.forwards.length) {
             this.misbehave.rereadFailsAfterForward = false;
+            return send(502, "Bad Gateway");
+          }
+          if (this.misbehave.rereadFailsAfterCreate && (this.emails.length || this.createdDrafts.length)) {
+            this.misbehave.rereadFailsAfterCreate = false;
             return send(502, "Bad Gateway");
           }
           if (this.misbehave.rereadFailsAfterReply && this.replies.length) {
@@ -646,6 +795,10 @@ export interface FakeConv {
   list_mailbox_id?: number | string | null;
   /** Reply form Cc preset (the conversation's remembered CC list). */
   cc_preset?: string[];
+  /** Subject (default "Fake subject {id}"). */
+  subject?: string;
+  /** Tags module tags of this conversation (rendered with the module's controls); undefined = no controls. */
+  tags?: string[];
   threads: FakeThread[];
 }
 
@@ -653,6 +806,7 @@ const STATUS_NAMES: Record<number, string> = { 1: "Active", 2: "Pending", 3: "Cl
 
 /** Conversation page with the selectors parseConversation reads (synthetic content). Threads newest first. */
 export function simConversationPage(base: string, token: string, id: number, c: FakeConv, userId = 7): string {
+  if (c.draft && c.threads.some((t) => t.type === "draft") && c.threads.every((t) => t.type === "draft")) return draftConversationPage(base, token, id, c, userId);
   const statusItems = [1, 2, 3, 4]
     .map((v) => `<li${v === c.status ? ' class="active"' : ""}><a href="#" data-status="${v}">${STATUS_NAMES[v]}</a></li>`)
     .join("");
@@ -688,7 +842,8 @@ export function simConversationPage(base: string, token: string, id: number, c: 
       t.type === "draft"
         ? ""
         : (t.to?.length ? `<div><strong>To:</strong> ${esc(t.to.join(", "))}</div>` : "") +
-          (t.cc?.length ? `<div><strong>Cc:</strong> ${esc(t.cc.join(", "))}</div>` : "");
+          (t.cc?.length ? `<div><strong>Cc:</strong> ${esc(t.cc.join(", "))}</div>` : "") +
+          (t.bcc?.length && t.type === "message" ? `<div><strong>Bcc:</strong> ${esc(t.bcc.join(", "))}</div>` : "");
     const recips = recipLines ? `<div class="thread-recipients">${recipLines}</div>` : "";
     // thread.blade.php: a draft's "[Draft]" marker sits outside <strong> (captured in docs/fixtures/conversation-1-draft.html).
     const draftMark = t.type === "draft" ? " &nbsp; [Draft]" : "";
@@ -696,6 +851,7 @@ export function simConversationPage(base: string, token: string, id: number, c: 
     return `<div class="thread thread-type-${t.type}" id="thread-${t.id}" data-thread_id="${t.id}"><div class="thread-message">${fwd}<div class="thread-header"><div class="thread-title"><div class="thread-person"><strong>${person}</strong>${draftMark}</div>${recips}</div><div class="thread-info"><a href="#thread-${t.id}" class="thread-date" title="Oct 26, 2026 10:00">now</a></div></div>${content}</div>${options}</div>`;
   };
   const layoutClass = c.draft ? "conv-new" : `conv-type-${c.type ?? "email"}`;
+  const tagMarkup = c.tags ? convTagsMarkup(base, c.tags) : { box: "", control: "" };
   const replyForm =
     (c.reply_to_options
       ? `<select name="to" id="to" class="form-control">${c.reply_to_options.map(([e, sel]) => `<option value="${esc(e)}"${sel ? ' selected="selected"' : ""}>Cust &lt;${esc(e)}&gt;</option>`).join("")}</select>`
@@ -708,8 +864,8 @@ export function simConversationPage(base: string, token: string, id: number, c: 
   return `<!DOCTYPE html><html><head><meta name="csrf-token" content="${token}"></head>
 <body data-auth_user_id="${userId}" data-conversation_id="${id}" data-mailbox_id="${c.mailbox_id}"><span class="nav-user">Agnes</span>
 ${c.list_mailbox_id === null ? "" : `<div id="conv-list-col" data-mailbox_id="${esc(String(c.list_mailbox_id ?? c.mailbox_id))}" data-conversation_id="${id}"></div>`}
-<div id="conv-layout" class="${layoutClass}"><div id="conv-toolbar">${menus}</div>
-<div id="conv-subject"><div class="conv-numnav"># <strong>${c.number}</strong></div><div class="conv-subjtext"><span>Fake subject ${id}</span></div></div>
+<div id="conv-layout" class="${layoutClass}"><div id="conv-toolbar">${menus}<div class="conv-actions">${tagMarkup.control}</div></div>${tagMarkup.box}
+<div id="conv-subject"><div class="conv-numnav"># <strong>${c.number}</strong></div><div class="conv-subjtext"><span>${esc(c.subject ?? `Fake subject ${id}`)}</span></div></div>
 ${c.no_customer_panel ? "" : `<div id="conv-layout-customer"><div class="customer-snippet"><a href="${base}/customers/5/edit" class="customer-name">Cust Omer</a>
 <ul class="customer-contacts"><li class="customer-email"><a href="#" class="contact-main">${esc(c.customer_email)}</a></li></ul></div></div>`}
 <div id="conv-layout-main">${[...c.threads].reverse().map(thread).join("\n")}</div><form class="form-reply">${c.draft ? "" : replyForm}</form></div></body></html>`;
@@ -947,4 +1103,69 @@ export function reportAjaxFixture(form: URLSearchParams): string {
   if (form.get("chart[group_by]") === "m") return fixture("reports-productivity-ajax-by-month.json");
   if (form.has("filters[user]")) return fixture("reports-productivity-ajax-user.json");
   return fixture("reports-productivity-ajax.json");
+}
+
+/**
+ * The create view (resources/views/conversations/create.blade.php + editor_bottom_toolbar.blade.php, FreeScout 1.8.248,
+ * read from source 2026-11-10; NOT a captured page): what GET /mailbox/{id}/new-ticket renders, and what
+ * GET /conversation/{id} renders for an unsent draft conversation (state 1). No .thread divs, no status/assignee menus.
+ */
+function createView(
+  base: string,
+  token: string,
+  userId: number,
+  v: {
+    mailboxId: number; conversationId?: number; threadId?: number; to?: string[]; cc?: string[]; bcc?: string[]; subject?: string; body?: string;
+    storedStatus?: number | null; statusSelected?: number | null; userSelected?: number | null; users?: Array<[number, string]>; anyone?: string;
+  },
+): string {
+  const opts = (list: string[]) => list.map((e) => `<option value="${esc(e)}" selected="selected">${esc(e)}</option>`).join("");
+  const statusOpts = [1, 2, 3].map((s) => `<option value="${s}"${v.statusSelected === s ? ' selected="selected"' : ""}>${STATUS_NAMES[s]}</option>`).join("");
+  const users: Array<[number, string]> = [[-1, v.anyone ?? "Anyone"], [userId, "Me"], ...(v.users ?? [[8, "Other Agent"]])];
+  const userOpts = users.map(([u, n]) => `<option value="${u}"${v.userSelected === u ? ' data-default="true" selected="selected"' : ""}>${esc(n)}</option>`).join("");
+  return `<!DOCTYPE html><html><head><meta name="csrf-token" content="${token}"></head>
+<body class="body-conv" data-auth_user_id="${userId}"${v.conversationId ? ` data-conversation_id="${v.conversationId}"` : ""} data-mailbox_id="${v.mailboxId}"><span class="nav-user">Agnes</span>
+<div id="conv-layout" class="conv-new"><div id="conv-layout-header"><div id="conv-toolbar"><div class="conv-actions"><h2>New Conversation</h2></div>
+<div class="conv-info">#${v.conversationId ? `<strong>${v.conversationId}</strong>` : '<strong class="conv-new-number">Pending</strong>'}</div></div></div>
+<div id="conv-layout-customer"></div>
+<div id="conv-layout-main" class="conv-new-form"><div class="conv-block"><form class="form-horizontal margin-top form-reply" method="POST" action="" id="form-create">
+<input type="hidden" name="_token" value="${token}">
+<input type="hidden" name="conversation_id" value="${v.conversationId ?? ""}"/>
+<input type="hidden" name="mailbox_id" value="${v.mailboxId}"/>
+<input type="hidden" name="is_note" value=""/><input type="hidden" name="is_phone" value=""/>
+<input type="hidden" name="type" value="${v.conversationId ? 1 : ""}"/>
+<input type="hidden" name="thread_id" value="${v.threadId ?? ""}"/>
+<input type="hidden" name="customer_id" value=""/>
+<input type="hidden" name="is_create" value="1"/>
+<select class="form-control recipient-select" name="to[]" id="to" multiple required>${opts(v.to ?? [])}</select>
+<label class="checkbox hidden" for="multiple_conversations" id="multiple-conversations-wrap"><input type="checkbox" name="multiple_conversations" value="1" id="multiple_conversations"> Send emails separately to each recipient</label>
+<select class="form-control recipient-select" name="cc[]" id="cc" multiple>${opts(v.cc ?? [])}</select>
+<select class="form-control recipient-select" name="bcc[]" id="bcc" multiple>${opts(v.bcc ?? [])}</select>
+<input id="subject" type="text" class="form-control" name="subject" value="${esc(v.subject ?? "")}" maxlength="998" required>
+<textarea id="body" class="form-control" name="body" rows="13">${esc(v.body ?? "")}</textarea>
+</form></div></div></div>
+<div id="editor_bottom_toolbar" style="display:none"><span class="editor-btm-text">Status:</span>
+<select name="status" class="form-control parsley-exclude" data-reply-status="1" data-note-status="${v.storedStatus ?? ""}">${statusOpts}</select>
+<span class="editor-btm-text">Assign to:</span><select name="user_id" class="form-control parsley-exclude">${userOpts}</select>
+<input type="hidden" name="after_send" id="after_send" value="2" class="parsley-exclude"/></div></body></html>`;
+}
+
+/** GET /mailbox/{id}/new-ticket. */
+export function newTicketPage(
+  base: string,
+  token: string,
+  mailboxId: number,
+  userId: number,
+  o: { users?: Array<[number, string]>; statusSelected?: number | null; userSelected?: number | null; anyone?: string } = {},
+): string {
+  return createView(base, token, userId, { mailboxId, statusSelected: o.statusSelected ?? null, userSelected: o.userSelected ?? null, users: o.users, anyone: o.anyone });
+}
+
+/** GET /conversation/{id} of a draft conversation (state 1): the create view pre-filled from the draft. */
+export function draftConversationPage(base: string, token: string, id: number, c: FakeConv, userId = 7): string {
+  const t = c.threads.find((x) => x.type === "draft")!;
+  return createView(base, token, userId, {
+    mailboxId: c.mailbox_id, conversationId: id, threadId: t.id, to: t.to ?? [], cc: t.cc ?? [], bcc: t.bcc ?? [],
+    subject: c.subject ?? `Fake subject ${id}`, body: t.body, storedStatus: c.status, statusSelected: 1, userSelected: -1,
+  });
 }

@@ -263,6 +263,35 @@ describe("HTTP transport: sessions", () => {
     expect(fs.replies).toEqual([]);
   });
 
+  it("create_conversation is always listed; it sends only when the server was started with reply gate + createSend; no header can enable it", async () => {
+    fs.dashboardMailboxes = [[1, "Support"]];
+    const hdr = {
+      "X-FreeScout-Cookie": fs.mintLoggedInCookie(),
+      "X-FreeScout-Create-Send": "1",
+      "X-FreeScout-Reply-Enabled": "1",
+      "FREESCOUT_CREATE_SEND": "1",
+    };
+    const args = { mailbox_id: 1, to: "partner@vendor.example", subject: "s", body: "b", send: true };
+    for (const opts of [{}, { reply: { enabled: true, mailboxes: [] } }, { createSend: true }, { reply: { enabled: false, mailboxes: [] }, createSend: true }]) {
+      await app.close();
+      await start(opts);
+      const { client } = await connect(hdr);
+      expect((await client.listTools()).tools.map((t) => t.name), JSON.stringify(opts)).toContain("create_conversation");
+      const r = await client.callTool({ name: "create_conversation", arguments: args });
+      expect(r.isError, JSON.stringify(opts)).toBe(true);
+      expect(text(r)).toMatch(/sending new conversations is disabled/);
+    }
+    expect(fs.convPosts).toEqual([]);
+    expect(fs.emails).toEqual([]);
+
+    await app.close();
+    await start({ reply: { enabled: true, mailboxes: [1] }, createSend: true });
+    const { client } = await connect(hdr);
+    const ok = await client.callTool({ name: "create_conversation", arguments: args });
+    expect(ok.isError).toBeFalsy();
+    expect(fs.emails).toHaveLength(1);
+  });
+
   it("isolates sessions: two cookies, two users, two jars", async () => {
     const a = await connect({ "X-FreeScout-Cookie": fs.mintLoggedInCookie(101) });
     const b = await connect({ "X-FreeScout-Cookie": fs.mintLoggedInCookie(202) });

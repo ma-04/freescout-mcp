@@ -4,7 +4,7 @@ import { loadHttpConfig } from "./config.js";
 import { describeForwarding } from "./forward-allow.js";
 import { createMcpHttpServer } from "./http-server.js";
 import { log, redact } from "./log.js";
-import { describeReply, REPLY_DISABLED } from "./reply-gate.js";
+import { describeCreate, describeReply, REPLY_DISABLED } from "./reply-gate.js";
 
 async function main(): Promise<void> {
   const config = loadHttpConfig();
@@ -17,6 +17,7 @@ async function main(): Promise<void> {
     forwardAllow: config.forwardAllow,
     statsDelayMs: config.statsDelayMs,
     reply: config.reply ?? REPLY_DISABLED,
+    createSend: config.createSend === true,
   });
   await new Promise<void>((resolve, reject) => {
     app.server.once("error", reject);
@@ -27,6 +28,7 @@ async function main(): Promise<void> {
   );
   log.info(describeForwarding(config.forwardAllow));
   log.info(describeReply(config.reply ?? REPLY_DISABLED));
+  log.info(describeCreate(config.reply ?? REPLY_DISABLED, config.createSend === true));
 
   let stopping = false;
   const stop = (signal: string) => {

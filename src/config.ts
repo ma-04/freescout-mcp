@@ -1,6 +1,6 @@
 import { parseForwardAllow } from "./forward-allow.js";
 import { log } from "./log.js";
-import { parseReplyGate, type ReplyGate } from "./reply-gate.js";
+import { parseCreateSend, parseReplyGate, type ReplyGate } from "./reply-gate.js";
 
 export { parseForwardAllow, recipientAllowed } from "./forward-allow.js";
 
@@ -25,6 +25,11 @@ export interface BaseConfig {
    * Always from the server's environment; never from a request header. Optional so older callers compile (= disabled).
    */
   reply?: ReplyGate;
+  /**
+   * FREESCOUT_CREATE_SEND, parsed: true only when it is 1/true AND FREESCOUT_REPLY_ENABLED is on. create_conversation
+   * may then send (send=true); otherwise it only creates drafts. Server environment only. Optional (= off).
+   */
+  createSend?: boolean;
 }
 
 /** stdio mode: one FreeScout identity, taken from the environment. */
@@ -69,12 +74,14 @@ export function loadBaseConfig(env: NodeJS.ProcessEnv = process.env): BaseConfig
     parsed.username = "";
     parsed.password = "";
   }
+  const reply = loadReplyGate(env);
   return {
     baseUrl: parsed.toString(),
     timeoutMs: positiveInt(env.FREESCOUT_TIMEOUT_MS, 30_000),
     forwardAllow: parseForwardAllow(env.FREESCOUT_FORWARD_ALLOW),
     statsDelayMs: nonNegativeInt(env.FREESCOUT_STATS_DELAY_MS, DEFAULT_STATS_DELAY_MS),
-    reply: loadReplyGate(env),
+    reply,
+    createSend: loadCreateSend(env, reply),
   };
 }
 
@@ -82,6 +89,12 @@ function loadReplyGate(env: NodeJS.ProcessEnv): ReplyGate {
   const gate = parseReplyGate(env);
   if (gate.warning) log.warn(gate.warning);
   return gate;
+}
+
+function loadCreateSend(env: NodeJS.ProcessEnv, reply: ReplyGate): boolean {
+  const create = parseCreateSend(env, reply.enabled);
+  if (create.warning) log.warn(create.warning);
+  return create.enabled;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {

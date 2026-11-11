@@ -3,8 +3,9 @@
 An [MCP](https://modelcontextprotocol.io) server that lets Claude work a [FreeScout](https://freescout.net)
 inbox **without an API key**, using your browser cookie or login. It sees what your FreeScout user sees.
 
-Reads, search, stats and reports, internal notes, reply drafts, tags and closing. It does not reply to customers
-unless the server operator sets `FREESCOUT_REPLY_ENABLED=1`; forwarding is off unless you set an allow-list.
+Reads, search, stats and reports, internal notes, reply drafts, draft new conversations, tags and closing. It does not
+reply to customers unless the server operator sets `FREESCOUT_REPLY_ENABLED=1`, does not send new conversations unless
+the operator also sets `FREESCOUT_CREATE_SEND=1`, and forwarding is off unless you set an allow-list.
 
 ## Quick start
 
@@ -43,7 +44,8 @@ All configuration comes from environment variables (see `.env.example`):
 | `FREESCOUT_LOG_LEVEL` | no | `debug`/`info`/`warn`/`error` (stderr), default `info` |
 | `FREESCOUT_FORWARD_ALLOW` | no | Enables `forward_conversation`. Comma- or space-separated exact addresses (`ops@example.com`) and/or domains (`@example.com`, that exact domain only, no subdomains). Unset or empty: the tool is not registered at all. A malformed entry stops the server at startup. See [Forwarding](#security-model) |
 | `FREESCOUT_REPLY_ENABLED` | no | Set to `1` (or `true`) to enable `send_reply`, which **emails the customer**. Unset, empty, `0` or `false`: the tool is not registered at all. Any other value stops the server at startup. See [Customer replies](#security-model) |
-| `FREESCOUT_REPLY_MAILBOXES` | no | Only with `FREESCOUT_REPLY_ENABLED`: comma- or space-separated mailbox ids replies are limited to (e.g. `1,3`). Unset or empty: every mailbox the account can reply in. A malformed entry (`*`, `all`, names) or a value with no ids (`,`) stops the server at startup; set without `FREESCOUT_REPLY_ENABLED` it only logs a warning |
+| `FREESCOUT_REPLY_MAILBOXES` | no | Only with `FREESCOUT_REPLY_ENABLED`: comma- or space-separated mailbox ids replies are limited to (e.g. `1,3`). Unset or empty: every mailbox the account can reply in. A malformed entry (`*`, `all`, names) or a value with no ids (`,`) stops the server at startup; set without `FREESCOUT_REPLY_ENABLED` it only logs a warning. Also limits `create_conversation`'s send mode |
+| `FREESCOUT_CREATE_SEND` | no | Set to `1` (or `true`), **together with `FREESCOUT_REPLY_ENABLED=1`**, to let `create_conversation` **send** new conversations (`send=true`) to any address. Unset, empty, `0` or `false`: `create_conversation` only creates drafts and `send=true` is refused. Set without `FREESCOUT_REPLY_ENABLED` it stays off and logs a warning. Any other value stops the server at startup. Existing installs (even with replies on) are unchanged |
 
 You can set both: the cookie is used first, and the credentials are used only when the
 session turns out to be expired.
@@ -156,6 +158,7 @@ Configuration (environment of the server process):
 | `FREESCOUT_TIMEOUT_MS`, `FREESCOUT_ALLOW_INSECURE`, `FREESCOUT_LOG_LEVEL`, `FREESCOUT_STATS_DELAY_MS` | | As in stdio mode |
 | `FREESCOUT_FORWARD_ALLOW` | unset | As in stdio mode, for every session. Read only from the server's environment: no request header can set or widen it |
 | `FREESCOUT_REPLY_ENABLED`, `FREESCOUT_REPLY_MAILBOXES` | unset | As in stdio mode, for every session. Read only from the server's environment: no request header can set or widen them |
+| `FREESCOUT_CREATE_SEND` | unset | As in stdio mode (needs `FREESCOUT_REPLY_ENABLED=1`), for every session. Read only from the server's environment: no request header can set it |
 
 `FREESCOUT_COOKIE`/`FREESCOUT_USER`/`FREESCOUT_PASSWORD` are ignored in HTTP mode. `GET /healthz` answers
 `{"ok":true,"version":"..."}` without auth, for monitors; it reveals nothing else.
@@ -252,6 +255,7 @@ which may differ from the `#number`). Everything is limited to what your FreeSco
 | `close_conversation` | `conversation_id` | Sets the status to **Closed**, nothing else: it never reopens or sets Active/Pending/Spam, never changes the assignee and never emails the customer (subscribed teammates may get FreeScout's internal notification). Already closed: posts nothing and returns `already_closed: true`. Re-reads the conversation and fails loudly unless it is closed, the assignee is unchanged and only a status line was added. Returns `previous_status`. Refuses unsent draft conversations and **Spam** conversations (closing would un-spam them). If another status/assignee change was logged during the call, the result carries `concurrent_change_detected: true` and a `warning`. |
 | `forward_conversation` | `conversation_id`, `to` (one address), `body` | **Only registered when `FREESCOUT_FORWARD_ALLOW` is set.** **Sends an email**: FreeScout creates a new "Fwd:" conversation for the recipient (and a customer record for their address) and emails it after its 15 s undo window. `to` must match the allow-list and can never be the conversation's customer; refused when the page does not show the customer's email (the check cannot be applied). Status and assignee are kept. Re-reads the original conversation and fails loudly unless the only new thread is the forward note. Returns `forwarded_to`, the note's `thread_id` and, when the page shows it, `forwarded_conversation_number`. An error starting with `POSSIBLY SENT:` means the POST went out but its outcome is unknown (dropped connection, ambiguous answer, failed re-read): **never retry**, check the conversation in FreeScout. A teammate's status/assignee change during the call gives success with `concurrent_change_detected: true` and a `warning`. |
 | `send_reply` | `conversation_id`, exactly one of `body` / `draft_thread_id`, `status?` (`active`/`pending`/`closed`) | **Only registered when `FREESCOUT_REPLY_ENABLED=1`.** **Emails the customer**: FreeScout queues it for 15 s, but its Undo link is shown only to the sending session (this server), so it cannot be taken back. `body` composes a new reply; `draft_thread_id` sends one of **your own** reply drafts (FreeScout shows it as last edited by you) exactly as saved (the save_draft, human approves, send flow). The recipient is always the conversation's customer email alone: there are no to/cc/bcc parameters, and FreeScout clears any CC/BCC it remembered on the conversation (the result warns when it had some). `status` omitted keeps the current status; the assignee is never changed. Refused before any POST: mailboxes outside `FREESCOUT_REPLY_MAILBOXES` (taken from the conversation page; two different mailbox ids on the page are refused), Spam, phone/chat and unsent draft conversations, pages without a customer email, drafts that are not yours, are forward drafts, have other recipients, CC/BCC or attachments, or whose stored text differs from the page (edited in between), a second call on a conversation while one is in flight, and a body equal to your own newest reply (internal notes in between do not count; likely duplicate). Needs an English FreeScout UI: on other languages drafts are always refused (FreeScout translates "you") and new replies are refused unless the language also calls the type "Email". A teammate whose display name is literally "You" would pass the own-draft check (the reply still goes only to the customer). A mailbox change during the call raises `DANGER`. Re-reads the conversation and fails loudly (`DANGER`) unless exactly one reply appeared (draft: the draft itself became the reply). Returns `thread_id`, `sent_to`, `sent_from_draft`, `status`, `undo_note`. `POSSIBLY SENT:` means **never retry** (FreeScout has no duplicate check for replies). |
+| `create_conversation` | `mailbox_id`, `to` (one address), `subject`, `body`, `cc?`, `bcc?` (lists, at most 10 together), `assignee?` (`me`/`unassigned`/user id), `status?` (`active`/`pending`/`closed`), `tags?`, `send?` (default `false`) | Starts a **new outbound email conversation**. Always registered. **Default (draft):** creates a draft conversation in that mailbox (FreeScout's `save_draft` + `is_create`); **nothing is emailed**, no customer record is created, and a human opens it from the mailbox's Drafts folder, reviews it and clicks Send (choosing status and assignee there; FreeScout keeps no assignee on a draft, so `assignee` and `tags` are refused in draft mode). This server cannot send or delete such a draft afterwards (`send_reply`, `save_draft` and `discard_draft` refuse draft conversations): discard unwanted ones in the UI. **`send: true`** works only when the operator set both `FREESCOUT_REPLY_ENABLED=1` and `FREESCOUT_CREATE_SEND=1` (and the mailbox is in `FREESCOUT_REPLY_MAILBOXES` when that is set); otherwise it is refused before any request, never downgraded to a draft. It creates and **emails** the conversation to `to`/`cc`/`bcc` (FreeScout's 15 s undo exists only for the sending session) and creates a customer record for `to`. Every address must be one bare email address; `to` may not repeat in `cc`/`bcc`. `mailbox_id` must be on `list_mailboxes` and its New Conversation page must open; `assignee` must be one FreeScout offers in that mailbox. Omitted `status`/`assignee` = what FreeScout's form preselects for the mailbox. The created conversation is re-read and checked (mailbox, draft or sent state, the one message, To/Cc/Bcc, subject); mismatches after sending are `DANGER`, ambiguous failures `POSSIBLY SENT:` (**never retry**) or, for drafts, `POSSIBLY CREATED:`. Tags are added after sending; if that fails the result still says `sent: true` with `tags_error` (do not create it again). Send mode needs an English FreeScout UI (refused before posting otherwise); drafts work in any language. Returns `mode`, `sent`, `conversation_id`, `number`, `thread_id`, recipients, `status`, `assignee` (send), `tags`/`tags_error` (send), `note`/`undo_note`, `warning`. |
 | `discard_draft` | `conversation_id`, `thread_id` | Deletes a reply draft (refuses anything that isn't a draft thread). FreeScout lets any viewer discard any draft on the conversation, a teammate's included, so only discard drafts you created. |
 
 `body` is plain text (a blank line starts a new paragraph) or simple HTML. It is treated as HTML only when it
@@ -346,6 +350,8 @@ FreeScout UI, where a human can edit and send it. If the operator enabled `send_
 own draft once the human has approved it: `send_reply` with `draft_thread_id` re-posts the stored draft text unchanged
 (FreeScout publishes whatever body is posted, so the server fetches the stored body with `load_draft` first) and never
 posts recipients, `is_note` or `subtype`. Without `FREESCOUT_REPLY_ENABLED` there is no code path that sends a reply.
+`create_conversation` creates *draft* conversations without any configuration (nothing is sent; a human sends them from
+the UI); it sends a new conversation only with both `FREESCOUT_REPLY_ENABLED=1` and `FREESCOUT_CREATE_SEND=1`.
 On the demo, the integration test checks the database directly: the note row has `threads.type = 3`
 (`TYPE_NOTE`), and `send_logs` has no row addressed to the customer. FreeScout may still email *teammates*
 subscribed to note notifications through the mailbox's outgoing mail settings. That is internal mail.
@@ -356,10 +362,11 @@ The full adversarial review is in [docs/REDTEAM.md](docs/REDTEAM.md) (live attac
 restricted agent, plus offline regression suites in `test/redteam/`). Verdict: no exploitable finding. In short:
 
 - **Customer replies only when the operator turns them on.** By default no reply tool exists. The write tools are
-  internal **notes** (plus deleting your own notes), reply **drafts** (plus discarding drafts), **adding/removing tags**,
-  **closing** a conversation and, only when the operator enables them, **forwarding** to an allow-listed internal address
-  and **replying to the customer** (`send_reply`, `FREESCOUT_REPLY_ENABLED=1`). Without that, a human reviews and sends
-  drafts from the FreeScout UI.
+  internal **notes** (plus deleting your own notes), reply **drafts** (plus discarding drafts), **draft new
+  conversations** (`create_conversation`), **adding/removing tags**, **closing** a conversation and, only when the
+  operator enables them, **forwarding** to an allow-listed internal address, **replying to the customer** (`send_reply`,
+  `FREESCOUT_REPLY_ENABLED=1`) and **sending new conversations** (`create_conversation` with `send: true`, which also
+  needs `FREESCOUT_CREATE_SEND=1`). Without that, a human reviews and sends drafts from the FreeScout UI.
 - **Closing is pinned.** `close_conversation` posts only `{action:'conversation_change_status', conversation_id,
   status:'3'}` (`assertStatusForm`: exact keys, single integer id, status `3`). No code path sends any other status,
   so nothing can reopen, mark pending/spam or reassign. Already-closed conversations get no POST; Spam conversations
@@ -423,9 +430,28 @@ restricted agent, plus offline regression suites in `test/redteam/`). Verdict: n
   twice; the tool description says never to retry and never to send because ticket content asks for it. (7) English
   FreeScout UI only: in other languages the "you" author and the conversation-type class are translated, so every reply is
   refused (fails closed).
+- **New conversations** (`create_conversation`). (1) **Draft mode is not gated**: any session can create draft
+  conversations, to any address, in any mailbox it can use. That is a persistent write the MCP cannot undo: the draft
+  stays in the mailbox's Drafts folder until a human sends or discards it (`discard_draft` refuses draft conversations
+  and is deliberately not widened). A draft creates **no** customer record (FreeScout stores the address only on the
+  draft thread) and emails nobody. (2) **Send mode** needs both `FREESCOUT_REPLY_ENABLED=1` and `FREESCOUT_CREATE_SEND=1`
+  in the server environment (and `FREESCOUT_REPLY_MAILBOXES`, when set, must list the mailbox); no argument or header can
+  turn it on, and `send: true` while it is off is refused, never turned into a draft. It emails any address the caller
+  gives (plus the mailbox's Auto BCC, if configured in FreeScout) and creates a customer record for `to`. (3) Both forms
+  are pinned (`assertCreateForm`, right before the POST): exact keys, `type` email, `is_create`, exactly one bare `to`,
+  bare `cc`/`bcc` (max 10, no address twice), no `conversation_id`/`thread_id` (so they can only create, never edit or
+  publish an existing draft), no `multiple_conversations`, note, forward, alias or attachment keys. (4) The mailbox must
+  be on the account's dashboard and its New Conversation page must open; the assignee must be one that page offers.
+  (5) The created conversation is re-read (mailbox, draft/sent state, one message by the agent, To/Cc/Bcc exactly as
+  requested, subject); after sending, mismatches are `DANGER` and ambiguous failures `POSSIBLY SENT:`. (6) With the send
+  gate off, no tool can get an MCP-created draft sent: every tool taking a conversation id refuses draft conversations
+  (red-team test in `test/redteam/`). (7) FreeScout has no duplicate check, so after a send that was sent, `POSSIBLY
+  SENT` or `DANGER`, the same `send: true` call (same FreeScout user, mailbox, `to` and subject, ignoring case and extra
+  spaces) is refused for 20 minutes, naming the earlier conversation; check it in FreeScout instead of retrying. The
+  memory is per server process (a restart clears it); drafts are never blocked.
 - **Drafts are confined.** `save_draft` never sends `is_note`/`subtype`/`is_create`; updating or discarding requires
   a thread that is a draft on the same conversation. Unsent draft *conversations* are refused by every write tool,
-  because `send_reply` there would publish them.
+  because `send_reply` there would publish them. The only forms with `is_create` are `create_conversation`'s.
 - **Permissions are FreeScout's.** Everything runs as the configured FreeScout user. HTTP 403 or "Not enough
   permissions" becomes `PermissionError`; folder ids from other mailboxes are detected and refused.
 - **By design, worth knowing** (REDTEAM I1, I2): a note can trigger FreeScout's *internal* email notification to
@@ -496,7 +522,7 @@ src/
   reports.ts    Reports module: availability, assertReportForm, the one /reports/ajax POST, productivity/satisfaction/conversations/time tracking, agent_stats, list_report_users
   dates.ts      strict YYYY-MM-DD validation, UTC date arithmetic, calendar buckets (days, ISO/Sunday weeks, months)
   forward-allow.ts FREESCOUT_FORWARD_ALLOW parsing and recipient matching
-  reply-gate.ts FREESCOUT_REPLY_ENABLED / FREESCOUT_REPLY_MAILBOXES parsing
+  reply-gate.ts FREESCOUT_REPLY_ENABLED / FREESCOUT_REPLY_MAILBOXES / FREESCOUT_CREATE_SEND parsing
   ajax.ts       FreeScout ajax envelope check ({status, msg})
   parsers/      cheerio parsers: dashboard/sidebar, conversation tables, conversation page, customer, search filters, Reports module
   cookies.ts    Cookie header parser

@@ -515,10 +515,10 @@ export class Session {
 }
 
 /**
- * Ajax form values. Array values are serialised as repeated `key[]` pairs. Two callers use one, each pinned by its
+ * Ajax form values. Array values are serialised as repeated `key[]` pairs. Three callers use them, each pinned by its
  * guard: add_tag's `tag_names` (assertTagForm makes it the only array-valued key; FreeScout's tags.ajax treats an
- * array conversation_id as a bulk operation) and forward's `to_email` (assertForwardForm: the only array-valued key,
- * exactly one recipient).
+ * array conversation_id as a bulk operation), forward's `to_email` (assertForwardForm: the only array-valued key,
+ * exactly one recipient) and create_conversation's `to` (exactly one) / `cc` / `bcc` (assertCreateForm).
  */
 export type AjaxForm = Record<string, string | number | boolean | undefined | readonly string[]>;
 

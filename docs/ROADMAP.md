@@ -38,6 +38,9 @@ Legend: effort S/M/L (hours of agent work), risk = what a bug could do in produc
   when the operator sets `FREESCOUT_REPLY_ENABLED=1` (optional `FREESCOUT_REPLY_MAILBOXES`); customer only, no
   recipient fields, own drafts sent unchanged, pinned form and after-state check (docs/freescout-endpoints.md §5.3).
   Without the variable the draft + human-send model is unchanged. Still out: other recipients, CC/BCC, attachments.
+- New outbound conversation (`is_create`). **Decided 2026-11-10: built.** `create_conversation` creates draft
+  conversations ungated; it sends (any to/cc/bcc) only with `FREESCOUT_REPLY_ENABLED=1` and `FREESCOUT_CREATE_SEND=1`
+  (docs/freescout-endpoints.md §5.7). Still out: `multiple_conversations`, attachments, phone conversations, deleting drafts.
 - Merge conversations, change customer, delete conversations or other people's threads. Irreversible or hard to audit.
   (Exception shipped 2026-11-04: `remove_note` deletes only the agent's own plain internal note, pinned `delete_thread`.)
 - Forward beyond the allow-list. Stays gated by `FREESCOUT_FORWARD_ALLOW`.

@@ -77,3 +77,47 @@ export function describeReply(gate: ReplyGate): string {
     ? `send_reply ENABLED: emails customers, limited to mailbox id${gate.mailboxes.length === 1 ? "" : "s"} ${gate.mailboxes.join(", ")}`
     : "send_reply ENABLED: emails customers, in every mailbox this account can reply in (FREESCOUT_REPLY_MAILBOXES not set)";
 }
+
+/**
+ * FREESCOUT_CREATE_SEND: whether create_conversation may SEND a new conversation (send=true). Draft mode needs nothing.
+ * Same value rules as FREESCOUT_REPLY_ENABLED: unset/empty/`0`/`false` = off, `1`/`true` (case-insensitive) = on,
+ * anything else throws. On only takes effect together with FREESCOUT_REPLY_ENABLED; set without it, send mode stays
+ * off and a warning is returned (logged at startup). FREESCOUT_REPLY_MAILBOXES limits send mode as it limits replies.
+ */
+export function parseCreateSend(
+  env: { FREESCOUT_CREATE_SEND?: string },
+  replyEnabled: boolean,
+): { enabled: boolean; warning?: string } {
+  const raw = (env.FREESCOUT_CREATE_SEND ?? "").trim();
+  if (!raw || /^(0|false)$/i.test(raw)) return { enabled: false };
+  if (!/^(1|true)$/i.test(raw)) {
+    throw new Error(
+      `FREESCOUT_CREATE_SEND: invalid value ${JSON.stringify(raw)}. Set it to 1 (or true), together with ` +
+        "FREESCOUT_REPLY_ENABLED=1, to let create_conversation send; leave it unset/empty to keep it draft-only.",
+    );
+  }
+  if (!replyEnabled) {
+    return {
+      enabled: false,
+      warning:
+        "FREESCOUT_CREATE_SEND is set but FREESCOUT_REPLY_ENABLED is not 1/true: create_conversation stays draft-only. " +
+        "Set FREESCOUT_REPLY_ENABLED=1 as well to let it send.",
+    };
+  }
+  return { enabled: true };
+}
+
+/** True when create_conversation may send in `mailboxId`: both variables on, and the reply mailbox list allows it. */
+export function createSendAllowed(gate: ReplyGate, createSend: boolean, mailboxId: number): boolean {
+  return createSend === true && replyMailboxAllowed(gate, mailboxId);
+}
+
+/** One line for the startup log. */
+export function describeCreate(gate: ReplyGate, createSend: boolean): string {
+  if (!(createSend === true && gate.enabled)) {
+    return "create_conversation: drafts only (sending needs FREESCOUT_REPLY_ENABLED=1 and FREESCOUT_CREATE_SEND=1)";
+  }
+  return gate.mailboxes.length
+    ? `create_conversation can SEND new conversations to any address, limited to mailbox id${gate.mailboxes.length === 1 ? "" : "s"} ${gate.mailboxes.join(", ")}`
+    : "create_conversation can SEND new conversations to any address, in every mailbox this account can use (FREESCOUT_REPLY_MAILBOXES not set)";
+}
