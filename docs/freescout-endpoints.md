@@ -263,6 +263,14 @@ the `modules` table has no rows. There is no saved-replies route in core. Core o
 - `POST /conversation/ajax` `action=load_customer_info`, `action=conv_list` (side list), `action=merge_search`.
 - `GET /conversation/ajax-html/{action}`: `send_log`, `show_original` (`thread_id`), `change_customer`,
   `move_conv`, `merge_conv`, `assignee_filter`, `default_redirect`. Return HTML fragments.
+- `show_original?thread_id=N` (used by `get_original_email`): tabs Preview (`#tab_preview_* iframe[srcdoc]`, the
+  message as received), Body (`#tab_body_* pre`, the thread body FreeScout kept after cutting quoted history, i.e.
+  what the conversation page shows) and, for received emails only, Headers (`#tab_headers_* pre`, raw headers).
+  Observed 2026-11-24 on a production FreeScout: for some Gmail replies FreeScout kept only the quoted agent text, so the
+  conversation page and the Body tab both repeat the previous reply; only Preview has the customer's words. HTTP 404
+  for unknown thread ids, status lines and notes without an original. The conversation page links it from each
+  thread's menu (`.thread-options a[href*="ajax-html/show_original"]`, surfaced as `has_original`). Not to be confused
+  with `.thread-original`, the pre-edit text of an edited thread.
 
 ---
 

@@ -6,6 +6,8 @@ export interface HtmlPage {
   $: cheerio.CheerioAPI;
   url: string;
   status: number;
+  /** Raw response body (set by FreeScoutClient; stubs may omit it). */
+  text?: string;
 }
 
 export interface WhoAmI {
@@ -58,7 +60,7 @@ export class FreeScoutClient implements FreeScoutPort {
     if (res.status < 200 || res.status >= 300) {
       throw new FreeScoutError(`FreeScout ${new URL(res.url).pathname} returned HTTP ${res.status}`, res.status);
     }
-    return { $: cheerio.load(res.text), url: res.url, status: res.status };
+    return { $: cheerio.load(res.text), url: res.url, status: res.status, text: res.text };
   }
 
   /**
