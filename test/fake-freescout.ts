@@ -30,6 +30,12 @@ export interface FakeOptions {
   loginDelayMs?: number;
   /** Mount the app under a sub-path, e.g. "/helpdesk" (FreeScout installed at https://host/helpdesk/). */
   prefix?: string;
+  /**
+   * Misbehaving answer to a POST /login with correct credentials: "503" (no redirect), "form" (200 login form),
+   * "cross-origin" (302 to another origin), "form-after-redirect" (302 to a page that is a 200 login form),
+   * "no-stick" (302 to /challenge, which answers 403; the session is never authenticated).
+   */
+  loginMode?: "503" | "form" | "cross-origin" | "form-after-redirect" | "no-stick";
 }
 
 export class FakeFreeScout {
@@ -629,6 +635,18 @@ export class FakeFreeScout {
         this.loginPosts++;
         if (this.opts.loginDelayMs) await new Promise((r) => setTimeout(r, this.opts.loginDelayMs));
         if (form.get("email") === (this.opts.email ?? "agent@example.com") && form.get("password") === (this.opts.password ?? "s3cret-pass")) {
+          switch (this.opts.loginMode) {
+            case "503":
+              return send(503, "Service Unavailable");
+            case "form":
+              return send(200, loginPage(this.base, sess.token));
+            case "cross-origin":
+              return send(302, "", { Location: "http://other.invalid/home" });
+            case "form-after-redirect":
+              return redirect("/login-form-200");
+            case "no-stick":
+              return redirect("/challenge");
+          }
           // session regeneration: new sid, new token
           this.sessions.delete(sid);
           for (const [v, s] of this.cookieToSid) if (s === sid) this.cookieToSid.delete(v);
@@ -647,6 +665,8 @@ export class FakeFreeScout {
       case `GET /users/profile/${sess.userId ?? 7}`:
         if (!sess.authed) return redirect("/login");
         return send(200, profile(sess.token, sess.userId));
+      case "GET /challenge":
+        return send(403, "Forbidden (challenge)");
       case "GET /login-form-200":
         return send(200, loginPage(this.base, sess.token));
       case "GET /slow":

@@ -494,6 +494,67 @@ describe("Session login with an intended URL that is not a 200", () => {
   });
 });
 
+describe("Session login: every rejected shape counts toward the lockout", () => {
+  const failures = (s: Session) => (s as unknown as { loginFailures: number }).loginFailures;
+  const mk = () =>
+    new Session({
+      baseUrl: fs.base,
+      user: "agent@example.com",
+      password: "s3cret-pass",
+      logger: silentLogger,
+      maxLoginFailures: 3,
+      loginCooldownMs: 60_000,
+    });
+
+  it.each([
+    ["POST /login answers 503 with no redirect", "503", "HTTP 503"],
+    ["POST /login answers 200 with the login form", "form", "HTTP 200"],
+    ["POST /login redirects to another origin", "cross-origin", "HTTP 302"],
+    ["POST /login redirects to a page that is the login form", "form-after-redirect", "HTTP 200"],
+  ] as const)("%s", async (_n, mode, http) => {
+    fs.opts.loginMode = mode;
+    const s = mk();
+    for (let i = 0; i < 5; i++) {
+      // login() itself must reject it (not the later "session was not accepted" backstop).
+      await expect(s.request("/")).rejects.toMatchObject({
+        name: "AuthError",
+        reason: "login_failed",
+        message: expect.stringContaining(i < 3 ? `FreeScout login failed for FREESCOUT_USER (${http}` : "failed 3 times in a row"),
+      });
+      expect(failures(s)).toBe(Math.min(i + 1, 3));
+    }
+    expect(fs.loginPosts).toBe(3);
+    await s.dispose();
+  });
+
+  it("a login that looks fine but whose session is never accepted (302 to a 403 page) locks out", async () => {
+    fs.opts.loginMode = "no-stick";
+    const s = mk();
+    for (let i = 0; i < 5; i++) {
+      await expect(s.request("/")).rejects.toMatchObject({
+        name: "AuthError",
+        reason: "login_failed",
+        message: expect.stringContaining(i < 3 ? "session was not accepted" : "failed 3 times in a row"),
+      });
+      expect(failures(s)).toBe(Math.min(i + 1, 3));
+    }
+    expect(fs.loginPosts).toBe(3);
+    await s.dispose();
+  });
+
+  it("a later real success resets the counter", async () => {
+    fs.opts.loginMode = "no-stick";
+    const s = mk();
+    await expect(s.request("/")).rejects.toMatchObject({ reason: "login_failed" });
+    await expect(s.request("/")).rejects.toMatchObject({ reason: "login_failed" });
+    expect(failures(s)).toBe(2);
+    fs.opts.loginMode = undefined;
+    await expect(s.request("/")).resolves.toMatchObject({ status: 200 });
+    expect(failures(s)).toBe(0);
+    await s.dispose();
+  });
+});
+
 describe("loadHttpConfig", () => {
   const base = { FREESCOUT_URL: "https://support.example.com/", MCP_TOKEN: TOKEN };
   it("defaults to loopback:8787 and needs no FreeScout identity", () => {

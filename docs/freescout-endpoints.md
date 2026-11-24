@@ -909,7 +909,9 @@ Source: `app/Conversation.php` (`$search_filters` line 176, `search()` line 2549
   search). Cause (`ConversationsController::search` ~3050): for `#N` that exists and is viewable `$conversations`
   becomes a plain array and `searchQuery()` is skipped; with `$filters` non-empty there is no redirect, and the view
   calls `->links()` on the array. Use the exact `f[number]=N` filter instead. A 500 on the post-login intended URL is
-  reported by the session as a failed login, so this shape must never be sent. Agents limited to assigned
+  no longer reported as a failed login (the session judges the login POST by whether it got past `/login`, not by the
+  status of the intended URL), so the caller sees the real HTTP 500; it is still a wasted, failing request, so this
+  shape must never be sent. Agents limited to assigned
   conversations always have a filter (forced `assigned`), so `q=#N` alone hits the same 500 for them.
 - **Every `/search` also runs the customer search** (`searchCustomers()`): with an empty `q` that is `LIKE '%%'` over
   about a dozen customer columns plus `emails.email`, a LEFT JOIN, `GROUP BY customers.id` and `paginate(50)`, i.e. a

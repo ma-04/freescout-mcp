@@ -319,10 +319,27 @@ export class Session {
       if (!(e instanceof AuthError) || e.reason !== "logged_out") throw this.fail(e);
       if (!this.canAutoLogin) throw this.fail(new AuthError("no_credentials", this.authErrorMessage));
       this.log.info("session looks logged out; logging in with FREESCOUT_USER");
+      // Only a login this call triggered can be blamed for a retry that is still logged out.
+      const triggered = this.loginGeneration === gen;
       try {
-        if (this.loginGeneration === gen) await this.ensureLogin();
-        return await this.once(build);
+        if (triggered) await this.ensureLogin();
+        const res = await this.once(build);
+        // The session is accepted: a real success (ensureLogin leaves the failure count for this to clear).
+        this.loginFailures = 0;
+        this.loginLockedUntil = 0;
+        return res;
       } catch (e2) {
+        if (triggered && e2 instanceof AuthError && e2.reason === "logged_out") {
+          // The login POST looked fine (e.g. 302 to a page answering 403) but the cookie is never accepted:
+          // count it like a rejected password so it locks out instead of re-logging in on every call.
+          this.recordLoginFailure();
+          throw this.fail(
+            new AuthError(
+              "login_failed",
+              "FreeScout login appeared to succeed but the session was not accepted (the next request was bounced back to /login). A proxy/WAF challenge, 2FA or a cookie-blocking setup may be in the way; check FREESCOUT_USER/FREESCOUT_PASSWORD or paste a fresh FREESCOUT_COOKIE.",
+            ),
+          );
+        }
         throw this.fail(e2);
       }
     }
@@ -364,15 +381,10 @@ export class Session {
       this.loggingIn = true;
       this.authEpoch++;
       const attempt = this.login().then(
-        () => {
-          this.loginFailures = 0;
-          this.loginLockedUntil = 0;
-        },
+        // Success is not final here: send() clears the failure count once the new session is actually accepted.
+        () => undefined,
         (e: unknown) => {
-          if (e instanceof AuthError && e.reason === "login_failed") {
-            this.loginFailures++;
-            if (max !== undefined && this.loginFailures >= max) this.loginLockedUntil = this.now() + this.loginCooldownMs;
-          }
+          if (e instanceof AuthError && e.reason === "login_failed") this.recordLoginFailure();
           throw e;
         },
       );
@@ -383,6 +395,12 @@ export class Session {
       });
     }
     return this.loginPromise;
+  }
+
+  private recordLoginFailure(): void {
+    this.loginFailures++;
+    const max = this.maxLoginFailures;
+    if (max !== undefined && this.loginFailures >= max) this.loginLockedUntil = this.now() + this.loginCooldownMs;
   }
 
   /** Log in with FREESCOUT_USER / FREESCOUT_PASSWORD. Uses rawFetch only (no recursion). */
