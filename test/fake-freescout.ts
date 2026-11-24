@@ -16,6 +16,8 @@ import type { AddressInfo } from "node:net";
 
 interface Sess {
   authed: boolean;
+  /** Laravel's session 'url.intended': the protected URL that bounced to /login (consumed by the next successful login). */
+  intended?: string;
   token: string;
   /** FreeScout user id shown on the dashboard / profile (default 7). */
   userId?: number;
@@ -28,6 +30,12 @@ export interface FakeOptions {
   loginDelayMs?: number;
   /** Mount the app under a sub-path, e.g. "/helpdesk" (FreeScout installed at https://host/helpdesk/). */
   prefix?: string;
+  /**
+   * Misbehaving answer to a POST /login with correct credentials: "503" (no redirect), "form" (200 login form),
+   * "cross-origin" (302 to another origin), "form-after-redirect" (302 to a page that is a 200 login form),
+   * "no-stick" (302 to /challenge, which answers 403; the session is never authenticated).
+   */
+  loginMode?: "503" | "form" | "cross-origin" | "form-after-redirect" | "no-stick";
 }
 
 export class FakeFreeScout {
@@ -207,6 +215,14 @@ export class FakeFreeScout {
   };
   /** Every form POSTed to /reports/ajax, as raw [key, value] pairs (including _token), in arrival order. */
   reportPosts: Array<Array<[string, string]>> = [];
+  /**
+   * GET /conversation/ajax-html/show_original?thread_id=N. Known ids answer 200 with the given fragment; unknown ids 404
+   * (like FreeScout). `showOriginalStatus` forces every authed answer to that status (e.g. 500). Unauthed requests bounce
+   * to /login and remember the URL as "intended"; the next successful login POST redirects there (Laravel's
+   * redirect()->intended()), so the intended URL's status reaches the login flow.
+   */
+  showOriginal = new Map<number, string>();
+  showOriginalStatus?: number;
   private nextThreadId = 1000;
 
   /** Add a conversation to the simulation (defaults: active, assigned to user 7, one customer thread). */
@@ -619,13 +635,26 @@ export class FakeFreeScout {
         this.loginPosts++;
         if (this.opts.loginDelayMs) await new Promise((r) => setTimeout(r, this.opts.loginDelayMs));
         if (form.get("email") === (this.opts.email ?? "agent@example.com") && form.get("password") === (this.opts.password ?? "s3cret-pass")) {
+          switch (this.opts.loginMode) {
+            case "503":
+              return send(503, "Service Unavailable");
+            case "form":
+              return send(200, loginPage(this.base, sess.token));
+            case "cross-origin":
+              return send(302, "", { Location: "http://other.invalid/home" });
+            case "form-after-redirect":
+              return redirect("/login-form-200");
+            case "no-stick":
+              return redirect("/challenge");
+          }
           // session regeneration: new sid, new token
           this.sessions.delete(sid);
           for (const [v, s] of this.cookieToSid) if (s === sid) this.cookieToSid.delete(v);
           sid = rand();
+          const intended = sess.intended;
           sess = { authed: true, token: rand() };
           this.sessions.set(sid, sess);
-          return redirect("/home");
+          return redirect(intended ?? "/home");
         }
         return redirect("/login");
       }
@@ -636,6 +665,8 @@ export class FakeFreeScout {
       case `GET /users/profile/${sess.userId ?? 7}`:
         if (!sess.authed) return redirect("/login");
         return send(200, profile(sess.token, sess.userId));
+      case "GET /challenge":
+        return send(403, "Forbidden (challenge)");
       case "GET /login-form-200":
         return send(200, loginPage(this.base, sess.token));
       case "GET /slow":
@@ -717,6 +748,15 @@ export class FakeFreeScout {
         }
         if (sim) return json(...sim);
         return json(200, { status: "success", action: form.get("action") });
+      }
+      case "GET /conversation/ajax-html/show_original": {
+        if (!sess.authed) {
+          sess.intended = url.pathname + url.search;
+          return redirect("/login");
+        }
+        if (this.showOriginalStatus) return send(this.showOriginalStatus, "<h1>Server Error</h1>");
+        const frag = this.showOriginal.get(Number(url.searchParams.get("thread_id")));
+        return frag === undefined ? send(404, "<h1>Not Found</h1>") : send(200, frag);
       }
       default: {
         const nt = /^\/mailbox\/(\d+)\/new-ticket$/.exec(url.pathname);

@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadHttpConfig } from "../src/config.js";
 import { createMcpHttpServer, type HttpServerOptions, type McpHttpServer } from "../src/http-server.js";
 import { redact, silentLogger } from "../src/log.js";
+import { FreeScoutClient } from "../src/client.js";
+import { getOriginalEmail } from "../src/operations.js";
 import { Session } from "../src/session.js";
 import { FakeFreeScout } from "./fake-freescout.js";
 
@@ -401,6 +403,227 @@ describe("Session login lockout", () => {
     clock += 60_001;
     await expect(s.request("/")).rejects.toMatchObject({ name: "AuthError" });
     expect(fs.loginPosts).toBe(4);
+    await s.dispose();
+  });
+});
+
+describe("Session login with an intended URL that is not a 200", () => {
+  const mk = () =>
+    new Session({
+      baseUrl: fs.base,
+      user: "agent@example.com",
+      password: "s3cret-pass",
+      logger: silentLogger,
+      maxLoginFailures: 3,
+      loginCooldownMs: 60_000,
+    });
+  const failures = (s: Session) => (s as unknown as { loginFailures: number }).loginFailures;
+  /** Server forgets every session: the next request is logged out again and bounces to /login. */
+  const expire = () => {
+    const f = fs as unknown as { sessions: Map<string, unknown>; cookieToSid: Map<string, string> };
+    f.sessions.clear();
+    f.cookieToSid.clear();
+  };
+
+  it.each([
+    ["unknown thread (404)", undefined],
+    ["server error (500)", 500],
+    ["forbidden (403)", 403],
+  ])("%s on the intended URL is the real result, not login_failed, and never locks out", async (_n, status) => {
+    fs.showOriginalStatus = status;
+    const s = mk();
+    const client = new FreeScoutClient(s);
+    const expected = status === undefined ? /Thread 99 not found/ : status === 403 ? /denied access/ : /returned HTTP 500/;
+    for (let i = 0; i < 6; i++) {
+      await expect(getOriginalEmail(client, 99)).rejects.toThrow(expected);
+      expect(failures(s)).toBe(0);
+      expire();
+    }
+    expect(fs.loginPosts).toBe(6);
+    // Not locked out: a real request works, and a known thread is served after the same bounce.
+    fs.showOriginalStatus = undefined;
+    fs.showOriginal.set(
+      5,
+      '<div class="tab-content"><div id="tab_body_5" class="tab-pane"><pre class="pre-wrap">hello</pre></div></div>',
+    );
+    expire();
+    await expect(getOriginalEmail(client, 5)).resolves.toMatchObject({ thread_id: 5, body: "hello" });
+    expire();
+    await expect(s.request("/")).resolves.toMatchObject({ status: 200 });
+    await s.dispose();
+  });
+
+  it.each([401, 419])("a %s on the intended URL is still a failed login and counts toward the lockout", async (status) => {
+    fs.showOriginalStatus = status;
+    const s = mk();
+    const client = new FreeScoutClient(s);
+    for (let i = 0; i < 5; i++) {
+      await expect(getOriginalEmail(client, 99)).rejects.toMatchObject({ name: "AuthError" });
+      expire();
+    }
+    expect(failures(s)).toBe(3);
+    expect(fs.loginPosts).toBe(3);
+    fs.showOriginalStatus = undefined;
+    await s.dispose();
+  });
+
+  it("keeps the session after the failed intended URL (one login, then reuse)", async () => {
+    const s = mk();
+    const client = new FreeScoutClient(s);
+    await expect(getOriginalEmail(client, 99)).rejects.toThrow(/Thread 99 not found/);
+    await expect(getOriginalEmail(client, 98)).rejects.toThrow(/Thread 98 not found/);
+    expect(fs.loginPosts).toBe(1);
+    await expect(s.request("/")).resolves.toMatchObject({ status: 200 });
+    await s.dispose();
+  });
+
+  it("a wrong password with an intended URL still counts toward the lockout", async () => {
+    const s = new Session({
+      baseUrl: fs.base,
+      user: "agent@example.com",
+      password: "wrong",
+      logger: silentLogger,
+      maxLoginFailures: 3,
+      loginCooldownMs: 60_000,
+    });
+    const client = new FreeScoutClient(s);
+    for (let i = 0; i < 5; i++) await expect(getOriginalEmail(client, 99)).rejects.toMatchObject({ name: "AuthError" });
+    expect(failures(s)).toBe(3);
+    expect(fs.loginPosts).toBe(3);
+    await s.dispose();
+  });
+});
+
+describe("Session login: every rejected shape counts toward the lockout", () => {
+  const failures = (s: Session) => (s as unknown as { loginFailures: number }).loginFailures;
+  const mk = () =>
+    new Session({
+      baseUrl: fs.base,
+      user: "agent@example.com",
+      password: "s3cret-pass",
+      logger: silentLogger,
+      maxLoginFailures: 3,
+      loginCooldownMs: 60_000,
+    });
+
+  it.each([
+    ["POST /login answers 503 with no redirect", "503", "HTTP 503"],
+    ["POST /login answers 200 with the login form", "form", "HTTP 200"],
+    ["POST /login redirects to another origin", "cross-origin", "HTTP 302"],
+    ["POST /login redirects to a page that is the login form", "form-after-redirect", "HTTP 200"],
+  ] as const)("%s", async (_n, mode, http) => {
+    fs.opts.loginMode = mode;
+    const s = mk();
+    for (let i = 0; i < 5; i++) {
+      // login() itself must reject it (not the later "session was not accepted" backstop).
+      await expect(s.request("/")).rejects.toMatchObject({
+        name: "AuthError",
+        reason: "login_failed",
+        message: expect.stringContaining(i < 3 ? `FreeScout login failed for FREESCOUT_USER (${http}` : "failed 3 times in a row"),
+      });
+      expect(failures(s)).toBe(Math.min(i + 1, 3));
+    }
+    expect(fs.loginPosts).toBe(3);
+    await s.dispose();
+  });
+
+  it("a login that looks fine but whose session is never accepted (302 to a 403 page) locks out", async () => {
+    fs.opts.loginMode = "no-stick";
+    const s = mk();
+    for (let i = 0; i < 5; i++) {
+      await expect(s.request("/")).rejects.toMatchObject({
+        name: "AuthError",
+        reason: "login_failed",
+        message: expect.stringContaining(i < 3 ? "session was not accepted" : "failed 3 times in a row"),
+      });
+      expect(failures(s)).toBe(Math.min(i + 1, 3));
+    }
+    expect(fs.loginPosts).toBe(3);
+    await s.dispose();
+  });
+
+  it("a later real success resets the counter", async () => {
+    fs.opts.loginMode = "no-stick";
+    const s = mk();
+    await expect(s.request("/")).rejects.toMatchObject({ reason: "login_failed" });
+    await expect(s.request("/")).rejects.toMatchObject({ reason: "login_failed" });
+    expect(failures(s)).toBe(2);
+    fs.opts.loginMode = undefined;
+    await expect(s.request("/")).resolves.toMatchObject({ status: 200 });
+    expect(failures(s)).toBe(0);
+    await s.dispose();
+  });
+
+  it("a 404 that needs no login (unknown route) does not reset the count: a wrong password still locks out", async () => {
+    const s = new Session({
+      baseUrl: fs.base,
+      user: "agent@example.com",
+      password: "wrong-password",
+      logger: silentLogger,
+      maxLoginFailures: 3,
+      loginCooldownMs: 60_000,
+    });
+    for (let i = 0; i < 6; i++) {
+      await expect(s.request("/")).rejects.toMatchObject({ reason: "login_failed" });
+      await expect(s.request("/no-such-route-" + i)).resolves.toMatchObject({ status: 404 });
+    }
+    expect(fs.loginPosts).toBe(3);
+    await s.dispose();
+  });
+
+  it("concurrent callers sharing one non-sticking login count it once", async () => {
+    fs.opts.loginMode = "no-stick";
+    const s = mk();
+    const r = await Promise.allSettled([s.request("/"), s.request("/"), s.request("/")]);
+    expect(r.every((x) => x.status === "rejected")).toBe(true);
+    expect(fs.loginPosts).toBe(1);
+    expect(failures(s)).toBe(1);
+    await s.dispose();
+  });
+
+  it("any accepted request clears the counter, even when the retry after a good login failed for another reason", async () => {
+    let failNext = false;
+    let armed = true; // only the first good login's retry hits the network error
+    const f: typeof fetch = async (u, init) => {
+      const url = String(u);
+      if (failNext && !url.includes("/login") && !url.includes("/home") && (init?.method ?? "GET") === "GET") {
+        failNext = false;
+        throw new TypeError("ECONNRESET");
+      }
+      const res = await fetch(u, init);
+      if (armed && url.endsWith("/login") && init?.method === "POST" && !fs.opts.loginMode) {
+        armed = false;
+        failNext = true;
+      }
+      return res;
+    };
+    const s = new Session({
+      baseUrl: fs.base,
+      user: "agent@example.com",
+      password: "s3cret-pass",
+      logger: silentLogger,
+      maxLoginFailures: 3,
+      loginCooldownMs: 60_000,
+      fetchImpl: f,
+    });
+    fs.opts.loginMode = "no-stick";
+    await expect(s.request("/")).rejects.toMatchObject({ reason: "login_failed" });
+    await expect(s.request("/")).rejects.toMatchObject({ reason: "login_failed" });
+    expect(failures(s)).toBe(2);
+    fs.opts.loginMode = undefined;
+    await expect(s.request("/")).rejects.toThrow(/ECONNRESET/); // login fine, retry hit a network error
+    await expect(s.request("/")).resolves.toMatchObject({ status: 200 });
+    expect(failures(s)).toBe(0);
+    // Later the session expires and one login hits a transient 503: one failure, not a lockout.
+    const fx = fs as unknown as { sessions: Map<string, unknown>; cookieToSid: Map<string, string> };
+    fx.sessions.clear();
+    fx.cookieToSid.clear();
+    fs.opts.loginMode = "503";
+    await expect(s.request("/")).rejects.toMatchObject({ reason: "login_failed" });
+    expect(failures(s)).toBe(1);
+    fs.opts.loginMode = undefined;
+    await expect(s.request("/")).resolves.toMatchObject({ status: 200 });
+    expect(failures(s)).toBe(0);
     await s.dispose();
   });
 });

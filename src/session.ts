@@ -89,6 +89,10 @@ export class Session {
   private readonly now: () => number;
   private loginFailures = 0;
   private loginLockedUntil = 0;
+  /** Whether the last successful login() POSTed credentials (false: GET /login showed the session was already valid). */
+  private lastLoginPosted = false;
+  /** loginGeneration whose "session not accepted" failure was already counted (concurrent callers count it once). */
+  private notAcceptedCountedGen = -1;
 
   constructor(opts: SessionOptions) {
     const base = new URL(opts.baseUrl);
@@ -314,15 +318,42 @@ export class Session {
   private async send(build: () => Promise<{ path: string; opts: RequestOptions }>): Promise<SessionResponse> {
     const gen = this.loginGeneration;
     try {
-      return await this.once(build);
+      const res = await this.once(build);
+      this.sessionAccepted(res);
+      return res;
     } catch (e) {
       if (!(e instanceof AuthError) || e.reason !== "logged_out") throw this.fail(e);
       if (!this.canAutoLogin) throw this.fail(new AuthError("no_credentials", this.authErrorMessage));
       this.log.info("session looks logged out; logging in with FREESCOUT_USER");
+      // Only a login this call triggered can be blamed for a retry that is still logged out.
+      const triggered = this.loginGeneration === gen;
+      // The login this call ran (generation and whether it POSTed), read right after it settles.
+      let mine: { gen: number; posted: boolean } | undefined;
       try {
-        if (this.loginGeneration === gen) await this.ensureLogin();
-        return await this.once(build);
+        if (triggered) {
+          await this.ensureLogin();
+          mine = { gen: this.loginGeneration, posted: this.lastLoginPosted };
+        }
+        const res = await this.once(build);
+        this.sessionAccepted(res);
+        return res;
       } catch (e2) {
+        if (mine?.posted && e2 instanceof AuthError && e2.reason === "logged_out") {
+          // The login POST looked fine (e.g. 302 to a page answering 403) but the cookie is never accepted:
+          // count it like a rejected password so it locks out instead of re-logging in on every call.
+          // Concurrent callers share one login: count it once per login generation. A "session already valid"
+          // login (no POST) is not counted, so a page misread as the login form cannot lead to a lockout.
+          if (this.notAcceptedCountedGen !== mine.gen) {
+            this.notAcceptedCountedGen = mine.gen;
+            this.recordLoginFailure();
+          }
+          throw this.fail(
+            new AuthError(
+              "login_failed",
+              "FreeScout login appeared to succeed but the session was not accepted (the next request was bounced back to /login). A proxy/WAF challenge, 2FA or a cookie-blocking setup may be in the way; check FREESCOUT_USER/FREESCOUT_PASSWORD or paste a fresh FREESCOUT_COOKIE.",
+            ),
+          );
+        }
         throw this.fail(e2);
       }
     }
@@ -364,15 +395,10 @@ export class Session {
       this.loggingIn = true;
       this.authEpoch++;
       const attempt = this.login().then(
-        () => {
-          this.loginFailures = 0;
-          this.loginLockedUntil = 0;
-        },
+        // Success is not final here: send() clears the failure count once a request is actually accepted.
+        () => undefined,
         (e: unknown) => {
-          if (e instanceof AuthError && e.reason === "login_failed") {
-            this.loginFailures++;
-            if (max !== undefined && this.loginFailures >= max) this.loginLockedUntil = this.now() + this.loginCooldownMs;
-          }
+          if (e instanceof AuthError && e.reason === "login_failed") this.recordLoginFailure();
           throw e;
         },
       );
@@ -385,6 +411,23 @@ export class Session {
     return this.loginPromise;
   }
 
+  /**
+   * A 2xx that passed assertLoggedIn proves the session works: the failures are no longer "in a row".
+   * Not a 404/403/500 (Laravel answers an unknown route with 404 before auth, so it proves nothing), and not
+   * login() success itself, so a login whose session is never accepted keeps counting.
+   */
+  private sessionAccepted(res: SessionResponse): void {
+    if (res.status < 200 || res.status >= 300) return;
+    this.loginFailures = 0;
+    this.loginLockedUntil = 0;
+  }
+
+  private recordLoginFailure(): void {
+    this.loginFailures++;
+    const max = this.maxLoginFailures;
+    if (max !== undefined && this.loginFailures >= max) this.loginLockedUntil = this.now() + this.loginCooldownMs;
+  }
+
   /** Log in with FREESCOUT_USER / FREESCOUT_PASSWORD. Uses rawFetch only (no recursion). */
   async login(): Promise<void> {
     if (!this.user || !this.password) throw new AuthError("no_credentials");
@@ -392,6 +435,7 @@ export class Session {
     // RedirectIfAuthenticated: GET /login bounces to /home when the session is already valid.
     if (page.status === 200 && !isLoginFormHtml(page.text) && page.redirects.length > 0) {
       this.remember(page);
+      this.lastLoginPosted = false;
       this.markLoggedIn("session already valid");
       return;
     }
@@ -413,14 +457,25 @@ export class Session {
     });
     const bouncedToLogin =
       REDIRECT.has(res.status) && isLoginUrl(new URL(res.headers.get("location") ?? "/", res.url));
-    if (bouncedToLogin || res.status !== 200 || isLoginFormHtml(res.text)) {
+    // Judge the credential POST by whether it got past /login, not by the status of wherever Laravel sent
+    // us next: after a bounce from a protected URL the success redirect goes to that "intended" URL, which
+    // may legitimately be a 404 (unknown id), 403 or 500. A same-origin, non-login redirect hop is the
+    // success signal (rawFetch stops at a redirect back to /login, and a bad password gets exactly that).
+    // Still a failure: any redirect rawFetch did not follow (back to /login, cross-origin, no Location), a 401/419
+    // (the new session is not accepted), or the login form served again with any status.
+    const passedLogin = res.redirects.length > 0 || res.status === 200;
+    const rejected = REDIRECT.has(res.status) || res.status === 401 || res.status === 419;
+    const stillLoginForm = looksLikeHtml(res.headers.get("content-type"), res.text) && isLoginFormHtml(res.text);
+    if (bouncedToLogin || rejected || !passedLogin || stillLoginForm) {
       throw new AuthError(
         "login_failed",
         `FreeScout login failed for FREESCOUT_USER (HTTP ${res.status}${bouncedToLogin ? ", redirected back to /login" : ""}). Check the credentials, or paste a fresh FREESCOUT_COOKIE.`,
       );
     }
     this.csrf = undefined; // session id and token are regenerated on login
-    this.remember(res);
+    // Only a 200 page can carry a usable CSRF meta; an error page from the intended URL is not remembered.
+    if (res.status === 200) this.remember(res);
+    this.lastLoginPosted = true;
     this.markLoggedIn("logged in");
   }
 
