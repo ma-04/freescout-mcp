@@ -49,6 +49,11 @@ export interface ParsedThread {
    * `.thread-delete-trigger` for `isNote() && !first && can('delete')`, i.e. the logged-in user's own note).
    */
   can_delete?: true;
+  /**
+   * Present (true) only when FreeScout offers "Show Original" in this thread's menu: get_original_email(thread_id)
+   * then returns the stored original message (for a received email, the full text and its headers).
+   */
+  has_original?: true;
 }
 
 export interface ParsedConversation {
@@ -245,6 +250,8 @@ function parseThread(
   // FreeScout chrome only: the thread's own options menu (a direct child of the .thread div), never agent-written HTML.
   const deleteTrigger = el.children(".thread-options").find("a.thread-delete-trigger").filter((_, n) => !$(n).closest(".thread-content").length);
   if (deleteTrigger.length) thread.can_delete = true;
+  const original = el.children(".thread-options").find('a[href*="ajax-html/show_original"]').filter((_, n) => !$(n).closest(".thread-content").length);
+  if (original.length) thread.has_original = true;
   return thread;
 }
 

@@ -22,6 +22,7 @@ import {
   type MailboxSidebar,
   type MailboxSummary,
 } from "./parsers/mailbox.js";
+import { parseOriginal, type ParsedOriginal } from "./parsers/original.js";
 import { offeredFilters, parseSearchFilters, selectedAssigned, type FilterOption } from "./parsers/search-filters.js";
 import { htmlToText, squish } from "./parsers/text.js";
 
@@ -581,6 +582,36 @@ export function capThreads<C extends ParsedConversation>(
   const total = conv.threads.length;
   const cut = total > maxThreads;
   return { ...conv, threads: cut ? conv.threads.slice(total - maxThreads) : conv.threads, total_threads: total, threads_truncated: cut };
+}
+
+/** Result of get_original_email: the stored original of one thread (FreeScout's "Show Original"). */
+export interface OriginalEmail extends ParsedOriginal {
+  thread_id: number;
+  body_truncated?: true;
+}
+
+/**
+ * GET /conversation/ajax-html/show_original?thread_id=N (docs/freescout-endpoints.md §4.8). FreeScout answers 404 for
+ * an unknown thread id and for threads it has no original of (status lines, some notes).
+ */
+export async function getOriginalEmail(port: FreeScoutPort, threadId: number, maxChars = 20_000): Promise<OriginalEmail> {
+  let page: HtmlPage;
+  try {
+    page = await port.getHtml(`/conversation/ajax-html/show_original?thread_id=${threadId}`);
+  } catch (e) {
+    if (e instanceof FreeScoutError && e.status === 404) {
+      throw new FreeScoutError(`Thread ${threadId} not found, or FreeScout has no original message for it (HTTP 404)`, 404);
+    }
+    throw e;
+  }
+  const parsed = parseOriginal(page.$);
+  if (!parsed) throw new FreeScoutError(`Unexpected FreeScout markup: no original message for thread ${threadId}`);
+  const out: OriginalEmail = { thread_id: threadId, ...parsed };
+  if (out.body.length > maxChars) {
+    out.body = out.body.slice(0, maxChars) + " …";
+    out.body_truncated = true;
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------------------------

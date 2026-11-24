@@ -10,6 +10,7 @@ import { registerForwardConversation } from "./forward-conversation.js";
 import { registerGetConversation } from "./get-conversation.js";
 import { registerCustomerHistory } from "./customer-history.js";
 import { registerGetCustomer } from "./get-customer.js";
+import { registerGetOriginalEmail } from "./get-original-email.js";
 import { registerListAssignees } from "./list-assignees.js";
 import { registerListConversations } from "./list-conversations.js";
 import { registerListMailboxes } from "./list-mailboxes.js";
@@ -39,6 +40,7 @@ import { registerWhoami } from "./whoami.js";
  * create_conversation is always registered: by default it creates a DRAFT conversation (save_draft + is_create, nothing
  * emailed); it sends (send_reply + is_create, to/cc/bcc as given) only when ctx.createSend (FREESCOUT_CREATE_SEND=1 together
  * with FREESCOUT_REPLY_ENABLED=1), otherwise send=true is refused. Both forms are pinned (assertCreateForm).
+ * get_original_email is read-only (one GET of FreeScout's "Show Original" fragment for a thread).
  * list_tags, list_assignees, ticket_volume, waiting_conversations, customer_history and list_report_users are read-only (GET only). productivity_report and
  * satisfaction_report, conversations_report and time_tracking_report are read-only but send one report request per call (agent_stats one per bucket, paced), POST /reports/ajax, that only computes a report (assertReportForm; the session layer may retry it once after a CSRF refresh or re-login). Without FREESCOUT_REPLY_ENABLED there is no customer reply/send tool; there is no assign tool, and no reopen tool beyond send_reply's optional status.
  */
@@ -48,6 +50,7 @@ const registrars: Array<(server: McpServer, ctx: ToolContext) => void> = [
   registerListConversations,
   registerSearchConversations,
   registerGetConversation,
+  registerGetOriginalEmail,
   registerGetCustomer,
   registerCustomerHistory,
   registerWaitingConversations,

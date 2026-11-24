@@ -17,7 +17,7 @@ Legend: effort S/M/L (hours of agent work), risk = what a bug could do in produc
 | 1.3 | `waiting_conversations` (aging / SLA) | Composition of `list_conversations` over unassigned + mine/assigned folders; filter by the "waiting since" tooltip date older than N hours; per mailbox; capped pages | S | none |
 | 1.4 | Search by tag | `f[tag]=<name>` already on the search page (Tags module, §9); add `tag` to `search_conversations` | S | none |
 | 1.5 | `customer_history` | `get_customer` + per-conversation subjects/status/dates, summarised; pure composition | S | none |
-| 1.6 | Delivery debugging: `get_send_log`, `get_original_email` | `GET /conversation/ajax-html/send_log` and `show_original` (§4.8); capture fragments on the demo | S | none |
+| 1.6 | Delivery debugging: `get_send_log`, `get_original_email` (done: `get_original_email`) | `GET /conversation/ajax-html/send_log` and `show_original` (§4.8); capture fragments on the demo | S | none |
 | 1.7 | Attachment download | Verify the attachment URL and auth on the demo; return bytes or a size-capped text extract | M | none (read) |
 
 ## Tier 2: low-risk writes (internal, reversible in the UI)
