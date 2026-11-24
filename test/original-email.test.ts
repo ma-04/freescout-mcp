@@ -64,9 +64,10 @@ function port(pages: Record<number, string | Error>): FreeScoutPort & { gets: st
 
 describe("parseOriginal", () => {
   it("returns the customer's text first, drops head/style of quoted mail, and picks allow-listed headers", () => {
-    const r = parseOriginal(cheerio.load(fragment(CUSTOMER_BODY, HEADERS)))!;
+    const r = parseOriginal(fragment(CUSTOMER_BODY, HEADERS))!;
     expect(r.body.startsWith("It works now, thanks. You can close the ticket.\n\nSam")).toBe(true);
     expect(r.body).toContain("Could you retest?");
+    expect(r.body).toContain("On Mon, Demo Support <support@example.com> wrote:");
     expect(r.body).not.toContain("margin");
     expect(r.headers).toEqual({
       from: "Sam Customer <sam@example.org>",
@@ -79,19 +80,19 @@ describe("parseOriginal", () => {
   });
 
   it("has null headers for an agent reply (two tabs)", () => {
-    const r = parseOriginal(cheerio.load(fragment("<p>Hi Sam,</p><p>Could you retest?</p>")))!;
+    const r = parseOriginal(fragment("<p>Hi Sam,</p><p>Could you retest?</p>"))!;
     expect(r).toEqual({ body: "Hi Sam,\n\nCould you retest?", headers: null });
   });
 
   it("reads the preview (as received), not the Body tab (FreeScout's cut body)", () => {
-    const r = parseOriginal(cheerio.load(fragment(CUSTOMER_BODY, HEADERS, "<p>Could you retest?</p>")))!;
+    const r = parseOriginal(fragment(CUSTOMER_BODY, HEADERS, "<p>Could you retest?</p>"))!;
     expect(r.body.startsWith("It works now")).toBe(true);
   });
 
   it("keeps line breaks of a plain-text body and falls back to the Body tab", () => {
-    expect(parseOriginal(cheerio.load(fragment("line one\r\nline two\n\n-- \nSam")))!.body).toBe("line one\nline two\n\n-- \nSam");
+    expect(parseOriginal(fragment("line one\r\nline two\n\n-- \nSam"))!.body).toBe("line one\nline two\n\n-- \nSam");
     const bodyOnly = `<div id="tab_body_2"><pre class="pre-wrap">${esc("<p>only body</p>")}</pre></div>`;
-    expect(parseOriginal(cheerio.load(bodyOnly))!.body).toBe("only body");
+    expect(parseOriginal(bodyOnly)!.body).toBe("only body");
   });
 
   it("keeps entity-escaped text the customer typed (srcdoc is only quote-escaped)", async () => {
@@ -100,8 +101,44 @@ describe("parseOriginal", () => {
     expect(r.body).toBe('I get <b>Fatal error</b> from <sam@example.org> & <script>x</script> "quoted"');
   });
 
+  it("plain-text emails keep line breaks, <address>, <url> and tag mentions", () => {
+    const plain = "Hi,\r\nThe <style> tag breaks <title> on <https://example.com/a>.\r\n\r\nOn Mon, Demo <support@example.com> wrote:\r\n> retest? Tom &amp; Jerry &lt;3";
+    expect(parseOriginal(fragment(plain))!.body).toBe(
+      "Hi,\nThe <style> tag breaks <title> on <https://example.com/a>.\n\nOn Mon, Demo <support@example.com> wrote:\n> retest? Tom & Jerry <3",
+    );
+  });
+
+  it("reads the srcdoc of the preview tab's iframe only, whatever the quoting or attribute order", () => {
+    const decoys =
+      `<!-- <div id="tab_preview_0"><iframe srcdoc="<p>COMMENTED</p>"></iframe></div> -->` +
+      `<div data-id="tab_preview_9"><iframe srcdoc="<p>DATA-ID</p>"></iframe></div>`;
+    const variants = [
+      `<div id="tab_preview_1"><iframe srcdoc='<p>See &lt;b&gt;tag&lt;/b&gt;</p>'></iframe></div>`,
+      `<div data-x="a>b" id="tab_preview_1"><iframe title="a > b" srcdoc = "<p>See &lt;b&gt;tag&lt;/b&gt;</p>"></iframe></div>`,
+      `<section id="tab_preview_1"><iframe sandbox="" srcdoc="<p>See &lt;b&gt;tag&lt;/b&gt;</p>"></iframe></section>`,
+    ];
+    for (const v of variants) {
+      expect(parseOriginal(decoys + v + `<div id="other"><iframe srcdoc="<p>WRONG</p>"></iframe></div>`)!.body).toBe("See <b>tag</b>");
+    }
+  });
+
+  it("stays fast on hostile input", () => {
+    const t0 = Date.now();
+    parseOriginal("<div ".repeat(20_000));
+    parseOriginal('<div id="tab_preview_1">' + "<iframe ".repeat(20_000));
+    parseOriginal(fragment("<p>" + "<b>x</b>".repeat(20_000) + "</p>"));
+    expect(Date.now() - t0).toBeLessThan(2_000);
+  });
+
+  it("caps long header values", () => {
+    const h = pickHeaders(`Cc: ${"a@example.com, ".repeat(1_000)}\nSubject: ok`);
+    expect(h.cc!.length).toBe(2_002);
+    expect(h.cc!.endsWith(" …")).toBe(true);
+    expect(h.subject).toBe("ok");
+  });
+
   it("is null for unexpected markup", () => {
-    expect(parseOriginal(cheerio.load("<html><body><h1>Dashboard</h1></body></html>"))).toBeNull();
+    expect(parseOriginal("<html><body><h1>Dashboard</h1></body></html>")).toBeNull();
   });
 
   it("pickHeaders keeps the first value of a repeated field", () => {
@@ -128,6 +165,12 @@ describe("getOriginalEmail", () => {
   it("maps 404 to a clear not-found error and passes permission errors through", async () => {
     await expect(getOriginalEmail(port({}), 999)).rejects.toThrow(/Thread 999 not found, or FreeScout has no original/);
     await expect(getOriginalEmail(port({ 5: new PermissionError("denied") }), 5)).rejects.toBeInstanceOf(PermissionError);
+  });
+
+  it("refuses a thread id that is not a safe positive integer, before any request", async () => {
+    const p = port({});
+    for (const bad of [0, -1, 1.5, Number.NaN, 1e21]) await expect(getOriginalEmail(p, bad)).rejects.toThrow(/positive integer/);
+    expect(p.gets).toEqual([]);
   });
 
   it("fails loudly on unexpected markup", async () => {

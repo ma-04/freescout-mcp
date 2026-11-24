@@ -595,6 +595,7 @@ export interface OriginalEmail extends ParsedOriginal {
  * an unknown thread id and for threads it has no original of (status lines, some notes).
  */
 export async function getOriginalEmail(port: FreeScoutPort, threadId: number, maxChars = 20_000): Promise<OriginalEmail> {
+  if (!isPosInt(threadId)) throw new FreeScoutError(`thread_id must be a positive integer (got ${String(threadId)})`);
   let page: HtmlPage;
   try {
     page = await port.getHtml(`/conversation/ajax-html/show_original?thread_id=${threadId}`);
@@ -604,7 +605,9 @@ export async function getOriginalEmail(port: FreeScoutPort, threadId: number, ma
     }
     throw e;
   }
-  const parsed = parseOriginal(page.$, page.text);
+  // The raw text is needed (srcdoc must be cut from the source); FreeScoutClient always sets it.
+  if (page.text === undefined) throw new FreeScoutError("Internal: the show_original response text was not kept");
+  const parsed = parseOriginal(page.text);
   if (!parsed) throw new FreeScoutError(`Unexpected FreeScout markup: no original message for thread ${threadId}`);
   const out: OriginalEmail = { thread_id: threadId, ...parsed };
   if (out.body.length > maxChars) {

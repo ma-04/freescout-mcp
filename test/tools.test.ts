@@ -6,7 +6,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { FreeScoutClient } from "../src/client.js";
-import { AuthError, PermissionError } from "../src/errors.js";
+import { AuthError, FreeScoutError, PermissionError } from "../src/errors.js";
 import { silentLogger } from "../src/log.js";
 import type { ReplyGate } from "../src/reply-gate.js";
 import { Session } from "../src/session.js";
@@ -247,6 +247,34 @@ describe("tool registry", () => {
     err = new AuthError();
     r = await mcp.callTool({ name: "list_mailboxes", arguments: {} });
     expect((r.content as Array<{ text: string }>)[0]!.text).toMatch(/^AuthError: FreeScout session expired/);
+  });
+
+  it("get_original_email: the preview's text with the untrusted-content notice; 404 and bad ids are tool errors", async () => {
+    const client = offline();
+    const raw =
+      `<div id="tab_preview_5"><iframe srcdoc="<p>It works now &lt;3</p><div class=&quot;gmail_quote&quot;>On Mon, Demo wrote:</div>"></iframe></div>` +
+      `<div id="tab_body_5"><pre>On Mon, Demo wrote:</pre></div><div id="tab_headers_5"><pre>From: Sam &lt;sam@example.org&gt;\nSubject: Hi\nDKIM-Signature: x</pre></div>`;
+    const gets: string[] = [];
+    client.getHtml = async (path: string) => {
+      gets.push(path);
+      if (!path.endsWith("thread_id=5")) throw new FreeScoutError("Not found", 404);
+      return { $: cheerio.load(raw), url: "https://freescout.example.com" + path, status: 200, text: raw };
+    };
+    const { mcp, close } = await connect(client);
+    cleanup = close;
+    const r = await mcp.callTool({ name: "get_original_email", arguments: { thread_id: 5 } });
+    expect(r.isError).toBeFalsy();
+    const out = r.structuredContent as { content_notice: string; thread_id: number; body: string; headers: Record<string, string> };
+    expect(out.content_notice).toMatch(/untrusted/i);
+    expect(out.thread_id).toBe(5);
+    expect(out.body).toContain("It works now <3");
+    expect(out.headers).toEqual({ from: "Sam <sam@example.org>", subject: "Hi" });
+    expect(gets).toEqual(["/conversation/ajax-html/show_original?thread_id=5"]);
+    const missing = await mcp.callTool({ name: "get_original_email", arguments: { thread_id: 6 } });
+    expect(missing.isError).toBe(true);
+    expect((missing.content as Array<{ text: string }>)[0]!.text).toMatch(/Thread 6 not found/);
+    for (const thread_id of [0, -1, 1.5]) expect((await mcp.callTool({ name: "get_original_email", arguments: { thread_id } })).isError).toBe(true);
+    expect(gets.length).toBe(2);
   });
 
   it("returns JSON text plus structuredContent", async () => {
