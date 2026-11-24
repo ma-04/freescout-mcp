@@ -553,6 +553,62 @@ describe("Session login: every rejected shape counts toward the lockout", () => 
     expect(failures(s)).toBe(0);
     await s.dispose();
   });
+
+  it("concurrent callers sharing one non-sticking login count it once", async () => {
+    fs.opts.loginMode = "no-stick";
+    const s = mk();
+    const r = await Promise.allSettled([s.request("/"), s.request("/"), s.request("/")]);
+    expect(r.every((x) => x.status === "rejected")).toBe(true);
+    expect(fs.loginPosts).toBe(1);
+    expect(failures(s)).toBe(1);
+    await s.dispose();
+  });
+
+  it("any accepted request clears the counter, even when the retry after a good login failed for another reason", async () => {
+    let failNext = false;
+    let armed = true; // only the first good login's retry hits the network error
+    const f: typeof fetch = async (u, init) => {
+      const url = String(u);
+      if (failNext && !url.includes("/login") && !url.includes("/home") && (init?.method ?? "GET") === "GET") {
+        failNext = false;
+        throw new TypeError("ECONNRESET");
+      }
+      const res = await fetch(u, init);
+      if (armed && url.endsWith("/login") && init?.method === "POST" && !fs.opts.loginMode) {
+        armed = false;
+        failNext = true;
+      }
+      return res;
+    };
+    const s = new Session({
+      baseUrl: fs.base,
+      user: "agent@example.com",
+      password: "s3cret-pass",
+      logger: silentLogger,
+      maxLoginFailures: 3,
+      loginCooldownMs: 60_000,
+      fetchImpl: f,
+    });
+    fs.opts.loginMode = "no-stick";
+    await expect(s.request("/")).rejects.toMatchObject({ reason: "login_failed" });
+    await expect(s.request("/")).rejects.toMatchObject({ reason: "login_failed" });
+    expect(failures(s)).toBe(2);
+    fs.opts.loginMode = undefined;
+    await expect(s.request("/")).rejects.toThrow(/ECONNRESET/); // login fine, retry hit a network error
+    await expect(s.request("/")).resolves.toMatchObject({ status: 200 });
+    expect(failures(s)).toBe(0);
+    // Later the session expires and one login hits a transient 503: one failure, not a lockout.
+    const fx = fs as unknown as { sessions: Map<string, unknown>; cookieToSid: Map<string, string> };
+    fx.sessions.clear();
+    fx.cookieToSid.clear();
+    fs.opts.loginMode = "503";
+    await expect(s.request("/")).rejects.toMatchObject({ reason: "login_failed" });
+    expect(failures(s)).toBe(1);
+    fs.opts.loginMode = undefined;
+    await expect(s.request("/")).resolves.toMatchObject({ status: 200 });
+    expect(failures(s)).toBe(0);
+    await s.dispose();
+  });
 });
 
 describe("loadHttpConfig", () => {

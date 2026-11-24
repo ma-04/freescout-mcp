@@ -142,8 +142,9 @@ session. The stdio mode (`freescout-mcp`, env-based identity) is unchanged.
 Send the cookie, the user/password pair, or both. Without any of them the server answers `401` with a JSON-RPC
 error that names these headers. The identity is fixed when the session is created (`initialize`): later requests
 of that session must send exactly the same identity headers, otherwise `403`. To switch cookie or account, start
-a new session. Three failed logins in one session make further logins fail fast for 60 s, so a wrong password
-header does not hammer FreeScout.
+a new session. Three failed logins in a row in one session make further logins fail fast for 60 s, so a wrong password
+header does not hammer FreeScout. A login whose session FreeScout then does not accept (the next request is sent
+back to /login) counts as failed; any request that goes through resets the count.
 
 Configuration (environment of the server process):
 

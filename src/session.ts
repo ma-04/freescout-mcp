@@ -89,6 +89,10 @@ export class Session {
   private readonly now: () => number;
   private loginFailures = 0;
   private loginLockedUntil = 0;
+  /** Whether the last successful login() POSTed credentials (false: GET /login showed the session was already valid). */
+  private lastLoginPosted = false;
+  /** loginGeneration whose "session not accepted" failure was already counted (concurrent callers count it once). */
+  private notAcceptedCountedGen = -1;
 
   constructor(opts: SessionOptions) {
     const base = new URL(opts.baseUrl);
@@ -314,7 +318,9 @@ export class Session {
   private async send(build: () => Promise<{ path: string; opts: RequestOptions }>): Promise<SessionResponse> {
     const gen = this.loginGeneration;
     try {
-      return await this.once(build);
+      const res = await this.once(build);
+      this.sessionAccepted();
+      return res;
     } catch (e) {
       if (!(e instanceof AuthError) || e.reason !== "logged_out") throw this.fail(e);
       if (!this.canAutoLogin) throw this.fail(new AuthError("no_credentials", this.authErrorMessage));
@@ -324,15 +330,18 @@ export class Session {
       try {
         if (triggered) await this.ensureLogin();
         const res = await this.once(build);
-        // The session is accepted: a real success (ensureLogin leaves the failure count for this to clear).
-        this.loginFailures = 0;
-        this.loginLockedUntil = 0;
+        this.sessionAccepted();
         return res;
       } catch (e2) {
-        if (triggered && e2 instanceof AuthError && e2.reason === "logged_out") {
+        if (triggered && e2 instanceof AuthError && e2.reason === "logged_out" && this.lastLoginPosted) {
           // The login POST looked fine (e.g. 302 to a page answering 403) but the cookie is never accepted:
           // count it like a rejected password so it locks out instead of re-logging in on every call.
-          this.recordLoginFailure();
+          // Concurrent callers share one login: count it once per login generation. A "session already valid"
+          // login (no POST) is not counted, so a page misread as the login form cannot lead to a lockout.
+          if (this.notAcceptedCountedGen !== this.loginGeneration) {
+            this.notAcceptedCountedGen = this.loginGeneration;
+            this.recordLoginFailure();
+          }
           throw this.fail(
             new AuthError(
               "login_failed",
@@ -381,7 +390,7 @@ export class Session {
       this.loggingIn = true;
       this.authEpoch++;
       const attempt = this.login().then(
-        // Success is not final here: send() clears the failure count once the new session is actually accepted.
+        // Success is not final here: send() clears the failure count once a request is actually accepted.
         () => undefined,
         (e: unknown) => {
           if (e instanceof AuthError && e.reason === "login_failed") this.recordLoginFailure();
@@ -397,6 +406,15 @@ export class Session {
     return this.loginPromise;
   }
 
+  /**
+   * Any request that passed assertLoggedIn proves the session works: the failures are no longer "in a row".
+   * Not done on login() success itself, so a login whose session is never accepted keeps counting.
+   */
+  private sessionAccepted(): void {
+    this.loginFailures = 0;
+    this.loginLockedUntil = 0;
+  }
+
   private recordLoginFailure(): void {
     this.loginFailures++;
     const max = this.maxLoginFailures;
@@ -410,6 +428,7 @@ export class Session {
     // RedirectIfAuthenticated: GET /login bounces to /home when the session is already valid.
     if (page.status === 200 && !isLoginFormHtml(page.text) && page.redirects.length > 0) {
       this.remember(page);
+      this.lastLoginPosted = false;
       this.markLoggedIn("session already valid");
       return;
     }
@@ -449,6 +468,7 @@ export class Session {
     this.csrf = undefined; // session id and token are regenerated on login
     // Only a 200 page can carry a usable CSRF meta; an error page from the intended URL is not remembered.
     if (res.status === 200) this.remember(res);
+    this.lastLoginPosted = true;
     this.markLoggedIn("logged in");
   }
 
