@@ -417,10 +417,12 @@ export class Session {
     // us next: after a bounce from a protected URL the success redirect goes to that "intended" URL, which
     // may legitimately be a 404 (unknown id), 403 or 500. A same-origin, non-login redirect hop is the
     // success signal (rawFetch stops at a redirect back to /login, and a bad password gets exactly that).
-    // The login-form check only applies to a 200: an error page is not the form.
+    // Still a failure: any redirect rawFetch did not follow (back to /login, cross-origin, no Location), a 401/419
+    // (the new session is not accepted), or the login form served again with any status.
     const passedLogin = res.redirects.length > 0 || res.status === 200;
-    const stillLoginForm = res.status === 200 && isLoginFormHtml(res.text);
-    if (bouncedToLogin || !passedLogin || stillLoginForm) {
+    const rejected = REDIRECT.has(res.status) || res.status === 401 || res.status === 419;
+    const stillLoginForm = looksLikeHtml(res.headers.get("content-type"), res.text) && isLoginFormHtml(res.text);
+    if (bouncedToLogin || rejected || !passedLogin || stillLoginForm) {
       throw new AuthError(
         "login_failed",
         `FreeScout login failed for FREESCOUT_USER (HTTP ${res.status}${bouncedToLogin ? ", redirected back to /login" : ""}). Check the credentials, or paste a fresh FREESCOUT_COOKIE.`,

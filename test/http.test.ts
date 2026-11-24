@@ -442,11 +442,28 @@ describe("Session login with an intended URL that is not a 200", () => {
     expect(fs.loginPosts).toBe(6);
     // Not locked out: a real request works, and a known thread is served after the same bounce.
     fs.showOriginalStatus = undefined;
-    fs.showOriginal.set(5, "<p>no original markup</p>");
+    fs.showOriginal.set(
+      5,
+      '<div class="tab-content"><div id="tab_body_5" class="tab-pane"><pre class="pre-wrap">hello</pre></div></div>',
+    );
     expire();
-    await expect(getOriginalEmail(client, 5)).rejects.not.toMatchObject({ name: "AuthError" });
+    await expect(getOriginalEmail(client, 5)).resolves.toMatchObject({ thread_id: 5, body: "hello" });
     expire();
     await expect(s.request("/")).resolves.toMatchObject({ status: 200 });
+    await s.dispose();
+  });
+
+  it.each([401, 419])("a %s on the intended URL is still a failed login and counts toward the lockout", async (status) => {
+    fs.showOriginalStatus = status;
+    const s = mk();
+    const client = new FreeScoutClient(s);
+    for (let i = 0; i < 5; i++) {
+      await expect(getOriginalEmail(client, 99)).rejects.toMatchObject({ name: "AuthError" });
+      expire();
+    }
+    expect(failures(s)).toBe(3);
+    expect(fs.loginPosts).toBe(3);
+    fs.showOriginalStatus = undefined;
     await s.dispose();
   });
 
