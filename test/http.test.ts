@@ -554,6 +554,23 @@ describe("Session login: every rejected shape counts toward the lockout", () => 
     await s.dispose();
   });
 
+  it("a 404 that needs no login (unknown route) does not reset the count: a wrong password still locks out", async () => {
+    const s = new Session({
+      baseUrl: fs.base,
+      user: "agent@example.com",
+      password: "wrong-password",
+      logger: silentLogger,
+      maxLoginFailures: 3,
+      loginCooldownMs: 60_000,
+    });
+    for (let i = 0; i < 6; i++) {
+      await expect(s.request("/")).rejects.toMatchObject({ reason: "login_failed" });
+      await expect(s.request("/no-such-route-" + i)).resolves.toMatchObject({ status: 404 });
+    }
+    expect(fs.loginPosts).toBe(3);
+    await s.dispose();
+  });
+
   it("concurrent callers sharing one non-sticking login count it once", async () => {
     fs.opts.loginMode = "no-stick";
     const s = mk();

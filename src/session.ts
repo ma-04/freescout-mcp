@@ -319,7 +319,7 @@ export class Session {
     const gen = this.loginGeneration;
     try {
       const res = await this.once(build);
-      this.sessionAccepted();
+      this.sessionAccepted(res);
       return res;
     } catch (e) {
       if (!(e instanceof AuthError) || e.reason !== "logged_out") throw this.fail(e);
@@ -327,19 +327,24 @@ export class Session {
       this.log.info("session looks logged out; logging in with FREESCOUT_USER");
       // Only a login this call triggered can be blamed for a retry that is still logged out.
       const triggered = this.loginGeneration === gen;
+      // The login this call ran (generation and whether it POSTed), read right after it settles.
+      let mine: { gen: number; posted: boolean } | undefined;
       try {
-        if (triggered) await this.ensureLogin();
+        if (triggered) {
+          await this.ensureLogin();
+          mine = { gen: this.loginGeneration, posted: this.lastLoginPosted };
+        }
         const res = await this.once(build);
-        this.sessionAccepted();
+        this.sessionAccepted(res);
         return res;
       } catch (e2) {
-        if (triggered && e2 instanceof AuthError && e2.reason === "logged_out" && this.lastLoginPosted) {
+        if (mine?.posted && e2 instanceof AuthError && e2.reason === "logged_out") {
           // The login POST looked fine (e.g. 302 to a page answering 403) but the cookie is never accepted:
           // count it like a rejected password so it locks out instead of re-logging in on every call.
           // Concurrent callers share one login: count it once per login generation. A "session already valid"
           // login (no POST) is not counted, so a page misread as the login form cannot lead to a lockout.
-          if (this.notAcceptedCountedGen !== this.loginGeneration) {
-            this.notAcceptedCountedGen = this.loginGeneration;
+          if (this.notAcceptedCountedGen !== mine.gen) {
+            this.notAcceptedCountedGen = mine.gen;
             this.recordLoginFailure();
           }
           throw this.fail(
@@ -407,10 +412,12 @@ export class Session {
   }
 
   /**
-   * Any request that passed assertLoggedIn proves the session works: the failures are no longer "in a row".
-   * Not done on login() success itself, so a login whose session is never accepted keeps counting.
+   * A 2xx that passed assertLoggedIn proves the session works: the failures are no longer "in a row".
+   * Not a 404/403/500 (Laravel answers an unknown route with 404 before auth, so it proves nothing), and not
+   * login() success itself, so a login whose session is never accepted keeps counting.
    */
-  private sessionAccepted(): void {
+  private sessionAccepted(res: SessionResponse): void {
+    if (res.status < 200 || res.status >= 300) return;
     this.loginFailures = 0;
     this.loginLockedUntil = 0;
   }

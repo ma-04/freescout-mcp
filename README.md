@@ -144,7 +144,7 @@ error that names these headers. The identity is fixed when the session is create
 of that session must send exactly the same identity headers, otherwise `403`. To switch cookie or account, start
 a new session. Three failed logins in a row in one session make further logins fail fast for 60 s, so a wrong password
 header does not hammer FreeScout. A login whose session FreeScout then does not accept (the next request is sent
-back to /login) counts as failed; any request that goes through resets the count.
+back to /login) counts as failed; any successful (2xx) request resets the count.
 
 Configuration (environment of the server process):
 
