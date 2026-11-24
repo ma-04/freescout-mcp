@@ -413,14 +413,22 @@ export class Session {
     });
     const bouncedToLogin =
       REDIRECT.has(res.status) && isLoginUrl(new URL(res.headers.get("location") ?? "/", res.url));
-    if (bouncedToLogin || res.status !== 200 || isLoginFormHtml(res.text)) {
+    // Judge the credential POST by whether it got past /login, not by the status of wherever Laravel sent
+    // us next: after a bounce from a protected URL the success redirect goes to that "intended" URL, which
+    // may legitimately be a 404 (unknown id), 403 or 500. A same-origin, non-login redirect hop is the
+    // success signal (rawFetch stops at a redirect back to /login, and a bad password gets exactly that).
+    // The login-form check only applies to a 200: an error page is not the form.
+    const passedLogin = res.redirects.length > 0 || res.status === 200;
+    const stillLoginForm = res.status === 200 && isLoginFormHtml(res.text);
+    if (bouncedToLogin || !passedLogin || stillLoginForm) {
       throw new AuthError(
         "login_failed",
         `FreeScout login failed for FREESCOUT_USER (HTTP ${res.status}${bouncedToLogin ? ", redirected back to /login" : ""}). Check the credentials, or paste a fresh FREESCOUT_COOKIE.`,
       );
     }
     this.csrf = undefined; // session id and token are regenerated on login
-    this.remember(res);
+    // Only a 200 page can carry a usable CSRF meta; an error page from the intended URL is not remembered.
+    if (res.status === 200) this.remember(res);
     this.markLoggedIn("logged in");
   }
 

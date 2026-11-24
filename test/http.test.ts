@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadHttpConfig } from "../src/config.js";
 import { createMcpHttpServer, type HttpServerOptions, type McpHttpServer } from "../src/http-server.js";
 import { redact, silentLogger } from "../src/log.js";
+import { FreeScoutClient } from "../src/client.js";
+import { getOriginalEmail } from "../src/operations.js";
 import { Session } from "../src/session.js";
 import { FakeFreeScout } from "./fake-freescout.js";
 
@@ -401,6 +403,76 @@ describe("Session login lockout", () => {
     clock += 60_001;
     await expect(s.request("/")).rejects.toMatchObject({ name: "AuthError" });
     expect(fs.loginPosts).toBe(4);
+    await s.dispose();
+  });
+});
+
+describe("Session login with an intended URL that is not a 200", () => {
+  const mk = () =>
+    new Session({
+      baseUrl: fs.base,
+      user: "agent@example.com",
+      password: "s3cret-pass",
+      logger: silentLogger,
+      maxLoginFailures: 3,
+      loginCooldownMs: 60_000,
+    });
+  const failures = (s: Session) => (s as unknown as { loginFailures: number }).loginFailures;
+  /** Server forgets every session: the next request is logged out again and bounces to /login. */
+  const expire = () => {
+    const f = fs as unknown as { sessions: Map<string, unknown>; cookieToSid: Map<string, string> };
+    f.sessions.clear();
+    f.cookieToSid.clear();
+  };
+
+  it.each([
+    ["unknown thread (404)", undefined],
+    ["server error (500)", 500],
+    ["forbidden (403)", 403],
+  ])("%s on the intended URL is the real result, not login_failed, and never locks out", async (_n, status) => {
+    fs.showOriginalStatus = status;
+    const s = mk();
+    const client = new FreeScoutClient(s);
+    const expected = status === undefined ? /Thread 99 not found/ : status === 403 ? /denied access/ : /returned HTTP 500/;
+    for (let i = 0; i < 6; i++) {
+      await expect(getOriginalEmail(client, 99)).rejects.toThrow(expected);
+      expect(failures(s)).toBe(0);
+      expire();
+    }
+    expect(fs.loginPosts).toBe(6);
+    // Not locked out: a real request works, and a known thread is served after the same bounce.
+    fs.showOriginalStatus = undefined;
+    fs.showOriginal.set(5, "<p>no original markup</p>");
+    expire();
+    await expect(getOriginalEmail(client, 5)).rejects.not.toMatchObject({ name: "AuthError" });
+    expire();
+    await expect(s.request("/")).resolves.toMatchObject({ status: 200 });
+    await s.dispose();
+  });
+
+  it("keeps the session after the failed intended URL (one login, then reuse)", async () => {
+    const s = mk();
+    const client = new FreeScoutClient(s);
+    await expect(getOriginalEmail(client, 99)).rejects.toThrow(/Thread 99 not found/);
+    await expect(getOriginalEmail(client, 98)).rejects.toThrow(/Thread 98 not found/);
+    expect(fs.loginPosts).toBe(1);
+    await expect(s.request("/")).resolves.toMatchObject({ status: 200 });
+    await s.dispose();
+  });
+
+  it("a wrong password with an intended URL still counts toward the lockout", async () => {
+    const s = new Session({
+      baseUrl: fs.base,
+      user: "agent@example.com",
+      password: "wrong",
+      logger: silentLogger,
+      maxLoginFailures: 3,
+      loginCooldownMs: 60_000,
+    });
+    const client = new FreeScoutClient(s);
+    for (let i = 0; i < 5; i++) await expect(getOriginalEmail(client, 99)).rejects.toMatchObject({ name: "AuthError" });
+    expect(failures(s)).toBe(3);
+    expect(fs.loginPosts).toBe(3);
     await s.dispose();
   });
 });
