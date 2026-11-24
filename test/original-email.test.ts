@@ -9,6 +9,8 @@ import { parseConversation } from "../src/parsers/conversation.js";
 import { parseOriginal, pickHeaders } from "../src/parsers/original.js";
 
 const BASE = "https://freescout.example.com";
+/** FreeScout's srcdoc escaping: only the double quote. */
+const escQuot = (s: string) => s.replace(/"/g, "&quot;");
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /** Synthetic "Show Original" fragment, same shape as FreeScout's (tabs Preview / Body / Headers). */
@@ -18,7 +20,7 @@ function fragment(body: string, headers?: string, kept = body): string {
 	<li role="presentation"><a data-toggle="tab" href="#tab_body_1">Body</a></li>
 	${headers ? '<li role="presentation"><a data-toggle="tab" href="#tab_headers_1">Headers</a></li>' : ""}</ul>
 <div class="tab-content">
-	<div id="tab_preview_1" class="tab-pane fade in active"><iframe sandbox="" srcdoc="${esc(body)}" frameborder="0" class="preview-iframe tab-body"></iframe></div>
+	<div id="tab_preview_1" class="tab-pane fade in active"><iframe sandbox="" srcdoc="${escQuot(body)}" frameborder="0" class="preview-iframe tab-body"></iframe></div>
 	<div id="tab_body_1" class="tab-pane fade"><pre class="pre-wrap">${esc(kept)}</pre></div>
 	${headers ? `<div id="tab_headers_1" class="tab-pane fade"><pre class="pre-wrap">${esc(headers)}</pre></div>` : ""}
 </div>`;
@@ -52,7 +54,7 @@ function port(pages: Record<number, string | Error>): FreeScoutPort & { gets: st
       const p = pages[Number(m[1])];
       if (p === undefined) throw new FreeScoutError("FreeScout page not found: /conversation/ajax-html/show_original", 404);
       if (p instanceof Error) throw p;
-      return { $: cheerio.load(p), url: new URL(path, BASE).toString(), status: 200 };
+      return { $: cheerio.load(p), url: new URL(path, BASE).toString(), status: 200, text: p };
     },
     async ajaxPost<T>(): Promise<T> {
       throw new Error("no ajax expected");
@@ -90,6 +92,12 @@ describe("parseOriginal", () => {
     expect(parseOriginal(cheerio.load(fragment("line one\r\nline two\n\n-- \nSam")))!.body).toBe("line one\nline two\n\n-- \nSam");
     const bodyOnly = `<div id="tab_body_2"><pre class="pre-wrap">${esc("<p>only body</p>")}</pre></div>`;
     expect(parseOriginal(cheerio.load(bodyOnly))!.body).toBe("only body");
+  });
+
+  it("keeps entity-escaped text the customer typed (srcdoc is only quote-escaped)", async () => {
+    const body = `<p>I get &lt;b&gt;Fatal error&lt;/b&gt; from &lt;sam@example.org&gt; &amp; &lt;script&gt;x&lt;/script&gt; "quoted"</p>`;
+    const r = await getOriginalEmail(port({ 21: fragment(body) }), 21);
+    expect(r.body).toBe('I get <b>Fatal error</b> from <sam@example.org> & <script>x</script> "quoted"');
   });
 
   it("is null for unexpected markup", () => {

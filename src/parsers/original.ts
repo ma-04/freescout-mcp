@@ -20,17 +20,29 @@ export interface ParsedOriginal {
  * FreeScout kept only the quoted agent text, only the preview had the customer's words); Body is the fallback.
  * Null when the fragment has neither (unexpected markup).
  */
-export function parseOriginal($: CheerioAPI): ParsedOriginal | null {
+export function parseOriginal($: CheerioAPI, raw?: string): ParsedOriginal | null {
   const bodyPre = $('[id^="tab_body_"] pre').first();
   const iframe = $('[id^="tab_preview_"] iframe[srcdoc]').first();
   let source: string | null = null;
-  if (iframe.length) source = iframe.attr("srcdoc") ?? "";
+  if (iframe.length) source = rawSrcdoc(raw) ?? iframe.attr("srcdoc") ?? "";
   else if (bodyPre.length) source = bodyPre.text();
   if (source === null) return null;
   // A plain-text email is stored as text: keep its line breaks instead of collapsing them as HTML.
   const body = /<\/?[a-z][^>]*>/i.test(source) ? htmlToText(source) : source.replace(/\r\n?/g, "\n").trim();
   const headersPre = $('[id^="tab_headers_"] pre').first();
   return { body, headers: headersPre.length ? pickHeaders(headersPre.text()) : null };
+}
+
+/**
+ * FreeScout escapes only `"` in the preview's srcdoc (the stored HTML goes in otherwise as is), so a parser that
+ * decodes the attribute turns the body's own `&lt;b&gt;` (text the customer typed) into markup that htmlToText then
+ * drops. Cut the attribute out of the raw response and undo `&quot;` only. Null when there is no raw text or no
+ * preview iframe in it.
+ */
+function rawSrcdoc(raw: string | undefined): string | null {
+  if (!raw) return null;
+  const m = /<div[^>]*\bid="tab_preview_[^"]*"[\s\S]*?<iframe\b[^>]*?\ssrcdoc="([^"]*)"/i.exec(raw);
+  return m ? m[1]!.replace(/&quot;/g, '"') : null;
 }
 
 /** Unfold RFC 5322 header lines and keep the first value of each wanted field. */

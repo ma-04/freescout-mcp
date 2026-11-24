@@ -604,7 +604,7 @@ export async function getOriginalEmail(port: FreeScoutPort, threadId: number, ma
     }
     throw e;
   }
-  const parsed = parseOriginal(page.$);
+  const parsed = parseOriginal(page.$, page.text);
   if (!parsed) throw new FreeScoutError(`Unexpected FreeScout markup: no original message for thread ${threadId}`);
   const out: OriginalEmail = { thread_id: threadId, ...parsed };
   if (out.body.length > maxChars) {
